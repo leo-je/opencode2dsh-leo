@@ -1,5 +1,5 @@
 /**
- * opencode2dsh — browser half. Registers the IP 池 page on the Plugins page
+ * opencode2dsh-leo — browser half. Registers the IP 池 page on the Plugins page
  * (设置 → 插件) through the `plugins.item` slot, which
  * @deepseek-ai/dsh-client-ui-plugin-manager owns, while the Host serves this
  * plugin's entry settings.
@@ -9,7 +9,7 @@
  * (`{ state, mutate }`) for the served entry. So this half only
  *  - registers the entry's one-liner and page, and
  *  - registers while the Host serves the namespace, so a deployment that
- *    serves no `opencode2dsh` settings shows no trace of the card.
+ *    serves no `opencode2dsh-leo` settings shows no trace of the card.
  *
  * The editable section is the `ipPool` volatile node, so the served form's
  * value is `{ ipPool: ... }` and every write path is `['ipPool', <field>]`.
@@ -49,7 +49,7 @@ export const NS = 'settings.ip-pool'
  * The Host settings entry this page edits: the Loader entry id, which is the
  * plugin name. The editable field inside it is `ipPool`.
  */
-export const SETTINGS_NAMESPACE = 'opencode2dsh'
+export const SETTINGS_NAMESPACE = 'opencode2dsh-leo'
 
 /** Where this page sorts among the Plugins page's official entries. */
 const ORDER = 20
@@ -68,7 +68,7 @@ export const inject = ['slots', 'locale']
  */
 export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'opencode2dsh: copy dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'opencode2dsh-leo: copy dictionaries')
   const slots = ctx.slots as unknown as {
     inject(name: string, callback: () => () => void): () => void
     spec(name: string): unknown
@@ -82,7 +82,7 @@ export function apply(ctx: ClientContext): void {
       () => {
         // 0.2 mounts configuration inside each installed bundle's row.
         const row = slots.inject('plugins.row.config', () => {
-          const disposers = ['@opencode2dsh/dsh-plugin', 'opencode2dsh'].map((pkg) => slots.register({
+          const disposers = ['@opencode2dsh-leo/dsh-plugin', 'opencode2dsh-leo'].map((pkg) => slots.register({
             name: 'plugins.row.config',
             key: `${pkg}#${SETTINGS_NAMESPACE}`,
             locale: NS,
@@ -102,6 +102,6 @@ export function apply(ctx: ClientContext): void {
         return () => { row(); legacy() }
       },
     ),
-    'opencode2dsh: settings page',
+    'opencode2dsh-leo: settings page',
   ) })
 }

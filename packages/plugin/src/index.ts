@@ -6,13 +6,13 @@ import { writeFile } from 'node:fs/promises'
 import { ModelCatalog, defaultCachePath, type CatalogSnapshot } from './adapter/catalog.ts'
 import { ZenAdapter, PROVIDER_ID } from './adapter/zen-adapter.ts'
 import { AgentProcess, type ReadyInfo } from './agent-process.ts'
-import { Config, configPaths, ensureToken, normalizeZenApiKey, ordinaryConfig, resolveConfig, writeAgentConfig, type CredentialSettings, type Opencode2dshConfig, type ResolvedPluginConfig } from './config.ts'
+import { Config, configPaths, ensureToken, normalizeZenApiKey, ordinaryConfig, resolveConfig, writeAgentConfig, type CredentialSettings, type Opencode2dshLeoConfig, type ResolvedPluginConfig } from './config.ts'
 import { applyIpPoolSettings } from './ip-pool-settings/apply.ts'
 import { readVolatile, type IpPoolSettings } from './ip-pool-settings/namespace.ts'
 import { fetchHealth, fetchModels, registerProvider, removeProviderRoute } from './provider.ts'
 
 /**
- * opencode2dsh DSH cordis plugin entry.
+ * opencode2dsh-leo DSH cordis plugin entry.
  *
  * Two modes (config.mode, default `adapter`):
  *  - adapter: register a DSH LlmAdapter streaming directly from the Zen
@@ -60,7 +60,7 @@ export interface PluginContext {
   emit?(event: string): unknown
 }
 
-export const name = 'opencode2dsh'
+export const name = 'opencode2dsh-leo'
 /**
  * The plugin's own settings schema. DSH 0.1.7 reads this export to decide
  * which fields are editable in 设置 → 插件 and under which namespace (the
@@ -80,13 +80,13 @@ export { Config } from './config.ts'
  * `ctx.inject` instead.
  */
 export const inject = ['llm'] as const
-export function apply(ctx: PluginContext, config: ResolvedPluginConfig | Opencode2dshConfig = {}): void {
+export function apply(ctx: PluginContext, config: ResolvedPluginConfig | Opencode2dshLeoConfig = {}): void {
   // A host that predates the `Config` export hands over the raw patch object
   // (no volatile reference); readVolatile copes with both spellings.
   const resolved = config as ResolvedPluginConfig
-  const mode = resolveConfig(config as Opencode2dshConfig).mode
+  const mode = resolveConfig(config as Opencode2dshLeoConfig).mode
   // Cordis accepts disposal effects; readiness objects are invalid effects.
-  if (mode === 'sidecar') applySidecar(ctx, config as Opencode2dshConfig)
+  if (mode === 'sidecar') applySidecar(ctx, config as Opencode2dshLeoConfig)
   else {
     applyAdapter(
       ctx,
@@ -119,7 +119,7 @@ function applyAdapter(
   const ready = Promise.resolve({ port: 0, version: 'adapter' })
 
   if (!ctx.llm || typeof ctx.llm.registerAdapter !== 'function') {
-    logger.error('opencode2dsh: llm service unavailable; adapter mode cannot register')
+    logger.error('opencode2dsh-leo: llm service unavailable; adapter mode cannot register')
     return { ready }
   }
 
@@ -129,7 +129,7 @@ function applyAdapter(
   // cordis.patch.yml; disabled keeps the process byte-for-byte on direct.
   // Lifecycle (assembly on first enable, live reconfigure, dispose) is owned
   // by applyIpPoolSettings through the plugin fiber.
-  const dataDir = join(homedir(), '.opencode2dsh')
+  const dataDir = join(homedir(), '.opencode2dsh-leo')
   const statusPath = join(dataDir, 'adapter-status.json')
   const writeStatus = (status: CatalogSnapshot, lastError: string): void => {
     void writeFile(
@@ -152,7 +152,7 @@ function applyAdapter(
     onRefresh: (status, lastError) => {
       if (disposed) return
       writeStatus(status, lastError)
-      if (lastError) logger.warn(`opencode2dsh: catalog refresh issue: ${lastError}`)
+      if (lastError) logger.warn(`opencode2dsh-leo: catalog refresh issue: ${lastError}`)
       const signature = catalogSignature()
       if (signature === publishedCatalog) return
       try {
@@ -164,7 +164,7 @@ function applyAdapter(
         else return
         publishedCatalog = signature
       } catch (err) {
-        logger.warn(`opencode2dsh: catalog announcement failed: ${err instanceof Error ? err.message : String(err)}`)
+        logger.warn(`opencode2dsh-leo: catalog announcement failed: ${err instanceof Error ? err.message : String(err)}`)
       }
     },
   })
@@ -184,7 +184,7 @@ function applyAdapter(
   // cost the deployment its only free provider.
   publishedCatalog = catalogSignature()
   registration = ctx.llm.registerAdapter([PROVIDER_ID], adapter)
-  logger.info(`opencode2dsh: adapter registered for "${PROVIDER_ID}" (catalog warms up in background)`)
+  logger.info(`opencode2dsh-leo: adapter registered for "${PROVIDER_ID}" (catalog warms up in background)`)
 
   // IP-pool exit routing (docs/ip-pool.md IP-1..IP-5): manual proxies,
   // pinned, free sources, subscriptions, and (IP-5) the volatile `ipPool`
@@ -206,12 +206,12 @@ function applyAdapter(
     const hadKey = lastCredential !== undefined
     lastCredential = next
     if (next === undefined) {
-      logger.info('opencode2dsh: API key cleared; the anonymous free lane is back in force')
+      logger.info('opencode2dsh-leo: API key cleared; the anonymous free lane is back in force')
     } else {
-      logger.info(`opencode2dsh: API key ${hadKey ? 'changed' : 'set'}; refreshing the model catalog for the paid lane`)
+      logger.info(`opencode2dsh-leo: API key ${hadKey ? 'changed' : 'set'}; refreshing the model catalog for the paid lane`)
     }
     void catalog.refreshOnce().catch((err) => {
-      logger.warn(`opencode2dsh: catalog refresh after key change failed: ${err instanceof Error ? err.message : String(err)}`)
+      logger.warn(`opencode2dsh-leo: catalog refresh after key change failed: ${err instanceof Error ? err.message : String(err)}`)
     })
   }
 
@@ -221,14 +221,14 @@ function applyAdapter(
       onVolatileUpdate,
     })
   } catch (err) {
-    logger.error(`opencode2dsh: ip-pool settings wiring failed; the provider route stays direct: ${err instanceof Error ? err.message : String(err)}`)
+    logger.error(`opencode2dsh-leo: ip-pool settings wiring failed; the provider route stays direct: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   void catalog.start().catch((err) => {
-    logger.error(`opencode2dsh: catalog start failed: ${err instanceof Error ? err.message : String(err)}`)
+    logger.error(`opencode2dsh-leo: catalog start failed: ${err instanceof Error ? err.message : String(err)}`)
   })
 
-  // A sidecar leftover (llm-pi-ai.providers.opencode2dsh pointing at a dead
+  // A sidecar leftover (llm-pi-ai.providers.opencode2dsh-leo pointing at a dead
   // local port) would shadow the adapter registration and fail every dispatch
   // with a connection error. Remove it before the route can be used.
   //
@@ -241,10 +241,10 @@ function applyAdapter(
       if (!sctx.settings) return
       void removeProviderRoute({ settings: sctx.settings }, cfg.providerId)
         .then((removed) => {
-          if (removed) logger.info(`opencode2dsh: removed stale sidecar route for "${cfg.providerId}" from llm-pi-ai settings`)
+          if (removed) logger.info(`opencode2dsh-leo: removed stale sidecar route for "${cfg.providerId}" from llm-pi-ai settings`)
         })
         .catch((err) => {
-          logger.warn(`opencode2dsh: stale route cleanup failed: ${err instanceof Error ? err.message : String(err)}`)
+          logger.warn(`opencode2dsh-leo: stale route cleanup failed: ${err instanceof Error ? err.message : String(err)}`)
         })
     })) as unknown as Promise<unknown>
   }
@@ -259,9 +259,9 @@ function applyAdapter(
   return { ready }
 }
 
-function applySidecar(ctx: PluginContext, config: Opencode2dshConfig): { ready: Promise<ReadyInfo> } {
+function applySidecar(ctx: PluginContext, config: Opencode2dshLeoConfig): { ready: Promise<ReadyInfo> } {
   const cfg = resolveConfig(config)
-  const paths = configPaths(join(homedir(), '.opencode2dsh'))
+  const paths = configPaths(join(homedir(), '.opencode2dsh-leo'))
   const logger = ctx.logger
 
   let agent: AgentProcess | null = null
@@ -321,7 +321,7 @@ function applySidecar(ctx: PluginContext, config: Opencode2dshConfig): { ready: 
       }
       await new Promise((r) => setTimeout(r, 300))
     }
-    logger.warn('opencode2dsh: catalog still pending after timeout; registering whatever the agent exposes now')
+    logger.warn('opencode2dsh-leo: catalog still pending after timeout; registering whatever the agent exposes now')
   }
 
   async function refreshModels(info: ReadyInfo, token: string, { waitReady = false } = {}): Promise<void> {
@@ -341,10 +341,10 @@ function applySidecar(ctx: PluginContext, config: Opencode2dshConfig): { ready: 
           models,
         )
       } else {
-        logger.warn('opencode2dsh: credentials/settings services unavailable; provider route not registered')
+        logger.warn('opencode2dsh-leo: credentials/settings services unavailable; provider route not registered')
       }
     } catch (err) {
-      logger.warn(`opencode2dsh: model refresh failed: ${err instanceof Error ? err.message : String(err)}`)
+      logger.warn(`opencode2dsh-leo: model refresh failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -369,13 +369,13 @@ function applySidecar(ctx: PluginContext, config: Opencode2dshConfig): { ready: 
       onLog,
     })
     agent.on('exit-restart', (delay, crashes) => {
-      logger.warn(`opencode2dsh: agent exited unexpectedly; restarting in ${delay}ms (attempt ${crashes})`)
+      logger.warn(`opencode2dsh-leo: agent exited unexpectedly; restarting in ${delay}ms (attempt ${crashes})`)
     })
     agent.on('circuit-tripped', (crashes) => {
-      logger.error(`opencode2dsh: agent crashed ${crashes} times consecutively; giving up`)
+      logger.error(`opencode2dsh-leo: agent crashed ${crashes} times consecutively; giving up`)
     })
     agent.on('state', (state) => {
-      if (state === 'ready') logger.info('opencode2dsh: agent ready')
+      if (state === 'ready') logger.info('opencode2dsh-leo: agent ready')
     })
     const info = await agent.start()
     readyResolve(info)
@@ -385,7 +385,7 @@ function applySidecar(ctx: PluginContext, config: Opencode2dshConfig): { ready: 
   }
 
   void startOnce().catch((err) => {
-    logger.error(`opencode2dsh: failed to start agent: ${err instanceof Error ? err.message : String(err)}`)
+    logger.error(`opencode2dsh-leo: failed to start agent: ${err instanceof Error ? err.message : String(err)}`)
   })
 
   // Register disposer on the plugin fiber so reload/unload/shutdown reaps the
@@ -418,7 +418,7 @@ function applySidecar(ctx: PluginContext, config: Opencode2dshConfig): { ready: 
  * build; then a bare name on PATH.
  */
 export function defaultAgentPath(): string {
-  const bin = 'opencode2dsh-agent'
+  const bin = 'opencode2dsh-leo-agent'
   const exe = process.platform === 'win32' ? `${bin}.exe` : bin
   const here = __dirnameSafe()
   for (const sibling of [
@@ -441,5 +441,5 @@ function __dirnameSafe(): string {
 }
 
 export { AgentProcess } from './agent-process.ts'
-export { configPaths, ensureToken, resolveConfig, writeAgentConfig, type Opencode2dshConfig } from './config.ts'
+export { configPaths, ensureToken, resolveConfig, writeAgentConfig, type Opencode2dshLeoConfig } from './config.ts'
 export { fetchHealth, fetchModels, registerProvider, providerBaseURL, toPiAiModels, type DshSeams } from './provider.ts'

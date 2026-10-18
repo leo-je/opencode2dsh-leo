@@ -1,5 +1,5 @@
 {
-  "name": "@opencode2dsh/dsh-plugin",
+  "name": "@opencode2dsh-leo/dsh-plugin",
   "version": "0.3.12",
   "description": "Free OpenCode Zen models for DeepSeek Harness (DSH): native dsh-llm adapter plugin, no API key.",
   "type": "module",

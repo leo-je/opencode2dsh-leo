@@ -6,7 +6,7 @@
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   nav: 'IP 池',
-  title: 'IP 池（opencode2dsh）',
+  title: 'IP 池（opencode2dsh-leo）',
   description: '多出口调度免费模型的可用性：出口间自动轮换、429 冷却、按出口×模型探活。',
   sectionApiKey: 'OpenCode Zen API Key',
   apiKeyLabel: 'API Key（可选）',
@@ -120,7 +120,7 @@ export const zh = {
 /** English dictionary, checked complete against the zh key set. */
 export const en: Record<keyof typeof zh, string> = {
   nav: 'IP Pool',
-  title: 'IP Pool (opencode2dsh)',
+  title: 'IP Pool (opencode2dsh-leo)',
   description: 'Schedules free-model availability across exit IPs: rotation, 429 cooldown, per-exit×model probes.',
   sectionApiKey: 'OpenCode Zen API Key',
   apiKeyLabel: 'API key (optional)',

@@ -639,7 +639,7 @@ test('local overrides win over models.dev fields (issue #56 mimo context window)
 })
 
 test('stale-while-revalidate: a fresh disk cache serves capability reads while the online fetch is slow (issue #55)', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'opencode2dsh-catalog-'))
+  const dir = await mkdtemp(join(tmpdir(), 'opencode2dsh-leo-catalog-'))
   const cachePath = join(dir, 'models.dev.json')
   const cacheBody = {
     updatedAt: Date.now(),
