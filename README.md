@@ -30,6 +30,7 @@ nothing to host.
 ## Highlights
 
 - **Zero credential, zero setup** — the anonymous lane needs no key; install, restart, chat
+- **Optional OpenCode Zen API key (paid lane)** — paste a key in the same settings card (write-only, never echoed back); requests then carry `Bearer <key>` and the picker serves the full catalog instead of the free-only roster. Leave it empty and nothing changes.
 - **Native adapter, no sidecar** — one npm package, no child process, no binary, no local port (the legacy Go sidecar is not part of the published package; see `legacy/`)
 - **CLI-identical disguise** — requests carry the OpenCode CLI user agent and its session/request/project header set, derived per conversation
 - **Selectable thinking levels** — reasoning-capable free models expose an effort picker in DSH's model selector (declared ladders where the model metadata provides them, Off/Minimal/Low/Medium/High otherwise); Responses-only `muse-spark-*` models expose only upstream-supported effort levels, and no selection keeps the provider default
@@ -89,6 +90,16 @@ Defaults work out of the box. Override via the profile's `cordis.patch.yml`:
 | `restartDelayMs` / `restartMaxDelayMs` / `maxConsecutiveCrashes` | `1000` / `60000` / `5` | Sidecar only: restart backoff and circuit breaker. |
 | `firstEventMs` / `bodyIdleMs` / `responsesBodyIdleMs` | `30000` / `120000` / `300000` | Adapter only, plugin 0.3.7+: stream-liveness watchdogs, in ms (integers from `1` to `600000`). Time to the first stream event, mid-response body silence, and the body-idle floor for Responses models (`muse-spark-*`). Increase `firstEventMs` for slow cold starts. Unset keeps the defaults; restart DSH after editing. |
 
+The Zen API key is **not** a `cordis.patch.yml` option — it is a write-only
+settings field. Open **Settings → Plugins → opencode2dsh** (the same card as
+the IP pool), paste the key, Save. Empty keeps the anonymous free lane exactly
+as before; with a key every request carries `Authorization: Bearer <key>` and
+the model picker serves the full live catalog (cost/deprecation filtering is
+what the anonymous lane needs, not you). The key is stripped from every
+settings response, so it is never echoed back to the browser. A key the
+endpoint rejects fails requests with the upstream auth error — there is no
+silent downgrade back to the free lane.
+
 ## How it works
 
 ```
@@ -100,6 +111,7 @@ ZenAdapter (registered LlmAdapter)
    │  pi-ai openai-responses stream (`muse-spark-*`, Responses-only on Zen)
    ▼
 https://opencode.ai/zen/v1        ← Authorization: Bearer public
+                                   (or Bearer <your Zen key> when one is configured)
    with CLI-identical headers:
      user-agent: opencode/…
      x-opencode-client, x-opencode-session, x-session-affinity,

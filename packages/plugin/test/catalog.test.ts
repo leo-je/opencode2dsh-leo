@@ -336,6 +336,62 @@ test('fetchZenModels sends the anonymous CLI disguise and parses ids', async () 
   )
 })
 
+test('fetchZenModels sends the configured key instead of the anonymous literal', async () => {
+  const capture: { url?: string; init?: RequestInit } = {}
+  const ids = await fetchZenModels('https://opencode.ai/zen/', fakeFetch({ 'https://opencode.ai/zen/v1/models': zenBody }, capture), opencodeUserAgent(), 'sk-live')
+  assert.deepEqual(ids, ['qwen-free', 'paid-model', 'ghost-free', 'legacy-free'])
+  const headers = new Headers(capture.init?.headers)
+  assert.equal(headers.get('authorization'), 'Bearer sk-live')
+  // Only the credential changes: the CLI disguise is what S1 validates.
+  assert.equal(headers.get('x-opencode-client'), 'cli')
+  assert.ok(headers.get('user-agent')?.startsWith('opencode/'))
+})
+
+test('a settings key unlocks the paid roster; clearing it restores free-only', async () => {
+  let key: string | undefined = 'sk-live'
+  const catalog = new ModelCatalog({
+    fetchImpl: fakeFetch({ 'https://opencode.ai/zen/v1/models': zenBody, 'https://models.dev/api.json': metadataBody }),
+    credential: () => key,
+  })
+  try {
+    await catalog.refreshOnce()
+    assert.equal(catalog.paidLane, true)
+    assert.deepEqual(catalog.list(), ['ghost-free', 'legacy-free', 'paid-model', 'qwen-free'], 'cost/deprecation filters do not apply to the paid lane')
+    assert.equal(catalog.decision('paid-model').source, 'paid_lane')
+
+    // Clearing the key must re-gate the catalog: the next refresh is anonymous
+    // again and the paid rows disappear from the picker.
+    key = undefined
+    await catalog.refreshOnce()
+    assert.equal(catalog.paidLane, false)
+    assert.deepEqual(catalog.list(), ['qwen-free'], 'back to the free-only roster')
+    assert.equal(catalog.decision('paid-model').allowed, false)
+  } finally {
+    catalog.stop()
+  }
+})
+
+test('a rejected key falls back to the anonymous lane instead of taking the catalog down', async () => {
+  const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+    const target = String(url).replace(/\?.*$/, '')
+    if (target.endsWith('/v1/models')) {
+      const auth = new Headers(init?.headers).get('authorization')
+      if (auth !== 'Bearer public') return new Response('unauthorized', { status: 401 })
+      return new Response(JSON.stringify(zenBody), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response(JSON.stringify(metadataBody), { status: 200, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  const catalog = new ModelCatalog({ fetchImpl, credential: () => 'sk-expired' })
+  try {
+    await catalog.refreshOnce()
+    assert.equal(catalog.paidLane, false, 'a key the endpoint rejects never claims the paid lane')
+    assert.deepEqual(catalog.list(), ['qwen-free'], 'the free lane still serves')
+    assert.match(catalog.lastError, /paid lane fetch failed/)
+  } finally {
+    catalog.stop()
+  }
+})
+
 test('ModelCatalog intersects the live catalog with free decisions', async () => {
   const catalog = new ModelCatalog({ fetchImpl: fakeFetch({ 'https://opencode.ai/zen/v1/models': zenBody, 'https://models.dev/api.json': metadataBody }) })
   try {

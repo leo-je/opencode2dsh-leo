@@ -130,6 +130,8 @@ const BRIDGE_PREFIX = '/api/opencode2dsh/ip-pool'
  * field name in front of the fields it makes editable.
  */
 const IP_POOL_FIELD = 'ipPool'
+/** The second volatile node of this entry: the write-only Zen API key. */
+const CREDENTIAL_FIELD = 'credential'
 
 const DEFAULTS: IpPoolSettingsValue = {
   enabled: false,
@@ -563,6 +565,110 @@ function ExitTable(props: { status: PoolStatusView | null; t: IpPoolCardProps['t
   )
 }
 
+/**
+ * The write-only OpenCode Zen API key row (the `credential` volatile node).
+ *
+ * The key is `role('secret')`: the Host strips it from every settings response,
+ * so there is nothing to prefill and no "is it set?" flag in the 0.1.7 snapshot
+ * — the input stays deliberately empty and the copy says so. Saving writes the
+ * whole secret in one `set` op; clearing writes an `unset`. Both fire
+ * immediately instead of riding the shared Save button, because the shared
+ * `diffWrites()` cannot see a field it is never allowed to read.
+ */
+function ApiKeySection(props: {
+  settings: ConfigPageForm | undefined
+  t: IpPoolCardProps['t']
+  writable: boolean
+}): ReactNode {
+  const { settings, t, writable } = props
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  /** Strip what users paste from docs/terminals: `Bearer ` prefixes and padding. */
+  const normalize = (raw: string): string => raw.trim().replace(/^bearer\s+/i, '').trim()
+
+  const write = async (ops: readonly ConfigPathOp[], okMessage: string): Promise<void> => {
+    if (!writable || settings === undefined) {
+      setFailed(true)
+      setMessage(t('apiKeyReadOnly'))
+      return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const accepted = await settings.mutate(ops, settings.state.revision)
+      setFailed(!accepted)
+      setMessage(accepted ? okMessage : t('apiKeyFailed'))
+      if (accepted) setDraft('')
+    } catch (err) {
+      setFailed(true)
+      setMessage(err instanceof Error ? err.message : t('apiKeyFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = (): void => {
+    const key = normalize(draft)
+    if (key === '') {
+      setFailed(true)
+      setMessage(t('apiKeyEmpty'))
+      return
+    }
+    void write([{ op: 'set', path: [CREDENTIAL_FIELD, 'apiKey'], value: key }], t('apiKeySaved'))
+  }
+
+  return (
+    <div className={styles.section} data-testid="section-api-key">
+      <span className={styles.sectionTitle}>{t('sectionApiKey')}</span>
+      <div className={styles.fieldRow}>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t('apiKeyLabel')}</span>
+          <input
+            className={styles.input}
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={draft}
+            placeholder={t('apiKeyPlaceholder')}
+            disabled={!writable || busy}
+            data-testid="field-apiKey"
+            onChange={(event) => { setDraft(event.target.value); setMessage(null) }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                save()
+              }
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className={styles.rowRemove}
+          disabled={!writable || busy || draft.trim() === ''}
+          data-testid="action-apiKey-save"
+          onClick={save}
+        >{t('apiKeySave')}</button>
+        <button
+          type="button"
+          className={styles.rowRemove}
+          disabled={!writable || busy}
+          data-testid="action-apiKey-clear"
+          onClick={() => { void write([{ op: 'unset', path: [CREDENTIAL_FIELD, 'apiKey'] }], t('apiKeyCleared')) }}
+        >{t('apiKeyClear')}</button>
+      </div>
+      <span className={styles.fieldHint}>{t('apiKeyHint')}</span>
+      {message !== null && (
+        <span className={failed ? `${styles.saveStatus} ${styles.saveStatusError}` : styles.saveStatus}>
+          {message}
+        </span>
+      )}
+    </div>
+  )
+}
+
 /** The card body. */
 function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardProps['t'] }): ReactNode {
   const { settings, t } = props
@@ -744,6 +850,8 @@ function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardPr
     <SettingsForm labels={formLabels(t)} state={shell} onSave={() => { void handleSave() }} onDiscard={handleDiscard}>
     <div className={styles.body} data-testid="ip-pool-form">
       <OverviewBar status={form.enabled ? status : null} t={t} />
+
+      <ApiKeySection settings={settings} t={t} writable={writable} />
 
       <label className={styles.radio}>
         <input

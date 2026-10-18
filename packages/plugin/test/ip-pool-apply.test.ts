@@ -134,6 +134,22 @@ test('disabled at boot: nothing assembles', async () => {
   assert.equal(controller.runtime, null)
 })
 
+test('the volatile-update hook fires per save, for credential-only saves too', async () => {
+  // The event is per Loader entry, not per volatile field: the credential
+  // consumer (catalog refresh) hangs off this same listener because the plugin
+  // has no other observer for it.
+  const host = makeVolatileHost()
+  let hookCalls = 0
+  applyIpPoolSettings(host.ctx, ordinary(), () => host.ref.get(), host.ctx.logger, {
+    assemble,
+    onVolatileUpdate: () => { hookCalls++ },
+  })
+  await tick(10)
+  host.commit({})
+  host.commit({})
+  assert.equal(hookCalls, 2)
+})
+
 test('boot-enabled: runtime assembles once from the resolved volatile value', async () => {
   resetCalls()
   const host = makeVolatileHost({ enabled: true, manual: ['http://1.1.1.1:1'] })

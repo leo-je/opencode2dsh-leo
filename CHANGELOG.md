@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Optional OpenCode Zen API key (paid lane).** The plugin's settings card now carries a write-only "OpenCode Zen API Key" field (`credential.apiKey`, a `role('secret')` volatile node, so the Host strips it from every settings response and it never rides a `describe()` back to the browser). Empty — the default — keeps the anonymous free lane byte-for-byte: `Authorization: Bearer public`, CLI disguise headers, and the bash/read body-gate stubs. With a key, every request and the catalog's `/v1/models` fetch carry `Bearer <key>`, and `decision()`/`list()` serve the paid roster instead of filtering by cost or deprecation; the anonymous lane's body gate is retired as well, because injecting fake `bash`/`read` tools into a paid request would let a model actually call them. A key the endpoint rejects (expired, revoked, typo) does not take the catalog down: the free-only roster stays served and the failure is reported in `lastError`, while inference keeps using the configured key so a bad key fails loudly instead of silently downgrading to the free lane. Clearing the key re-gates the catalog on the next refresh. Save/clear triggers an immediate catalog refresh through `loader/volatile-update`, while an ip-pool-only save costs no extra S1+S2 round.
+
 ## 0.3.12 (2026-10-14)
 
 ### Fixed

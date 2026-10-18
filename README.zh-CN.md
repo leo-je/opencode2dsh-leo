@@ -29,6 +29,7 @@ OpenCode 官方 CLI 无需登录即可使用的那批免费模型，它们会以
 ## 特性
 
 - **零凭据、零配置**——匿名通道不需要任何 Key；装好、重启、开聊
+- **可选 OpenCode Zen API Key（付费通道）**——在同一张设置卡片里填自己的 key（只写不读、不回显）；填了之后请求带 `Bearer <key>`，模型列表也从「仅免费」放开为完整目录。留空则行为与之前完全一致
 - **原生 adapter，无 sidecar**——一个 npm 包，没有子进程、没有二进制、没有本地端口（旧版 Go sidecar 不随包发行，见 `legacy/`）
 - **CLI 同形伪装**——请求携带 OpenCode CLI 的 User-Agent 和整套会话/请求/项目关联头，按会话派生
 - **思考等级可选**——带推理的免费模型在 DSH 模型选择器里出现思考等级选项（模型声明档位的按声明展示，其余提供 Off/Minimal/Low/Medium/High）；Off 向上游发送 `reasoning_effort: "none"` 真正停思考，不选则保持上游默认
@@ -85,6 +86,13 @@ dsh plugin --profile web add ./opencode2dsh-dsh-plugin-<version>.tgz
 | `restartDelayMs` / `restartMaxDelayMs` / `maxConsecutiveCrashes` | `1000` / `60000` / `5` | 仅 sidecar：重启退避与熔断阈值。 |
 | `firstEventMs` / `bodyIdleMs` / `responsesBodyIdleMs` | `30000` / `120000` / `300000` | 仅 adapter，插件 0.3.7 起支持：流存活超时，单位毫秒，取 `1` 到 `600000` 的整数。分别控制首事件等待、流中静默，以及 Responses 模型（`muse-spark-*`）的静默下限。冷启动慢时可调大 `firstEventMs`。不设置则使用默认值；修改后重启 DSH。 |
 
+Zen API Key **不是** `cordis.patch.yml` 选项，而是设置页里的只写字段：打开
+**设置 → 插件 → opencode2dsh**（与 IP 池同一张卡片），填入 key 保存即可。
+留空 = 原来的匿名免费通道；填了之后每个请求带 `Authorization: Bearer <key>`，
+模型列表放开为完整实时目录（成本/弃用过滤是匿名通道才需要的）。key 会被
+宿主从所有设置响应里剥除，不会回显到浏览器。key 无效时请求直接报上游鉴权
+错误，不会静默降级回免费通道。
+
 ## 工作原理
 
 ```
@@ -95,6 +103,7 @@ ZenAdapter（注册的 LlmAdapter）
    │  pi-ai openai-completions 流式
    ▼
 https://opencode.ai/zen/v1        ← Authorization: Bearer public
+                                   （配置了 key 时改为 Bearer <你的 Zen key>）
    携带与 CLI 同形的请求头：
      user-agent: opencode/…
      x-opencode-client, x-opencode-session, x-session-affinity,

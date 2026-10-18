@@ -52,7 +52,17 @@ export function applyIpPoolSettings(
   ordinary: OrdinaryPluginConfig,
   readIpPool: () => Partial<IpPoolSettings> | undefined,
   logger: PluginContext['logger'],
-  deps: { assemble?: AssembleIpPool; listLiveModels?: () => string[] } = {},
+  deps: {
+    assemble?: AssembleIpPool
+    listLiveModels?: () => string[]
+    /**
+     * Fired after this entry's `loader/volatile-update` handler ran. The event
+     * is per-entry, not per-field, so a save that only touched another volatile
+     * node (`credential`) lands here as well; that node's consumer needs a hook
+     * and this is the plugin's only listener on the event.
+     */
+    onVolatileUpdate?: () => void
+  } = {},
 ): IpPoolController {
   const assemble = deps.assemble ?? defaultAssemble
   let disposed = false
@@ -109,6 +119,9 @@ export function applyIpPoolSettings(
   if (typeof maybeOn === 'function') {
     maybeOn.call(ctx, 'loader/volatile-update', () => {
       applyCommitted(controller.settings())
+      // Disposal is checked here as well: the hook refreshes a process-wide
+      // catalog and must not fire for a fiber that is already gone.
+      if (!disposed) deps.onVolatileUpdate?.()
     })
   }
 

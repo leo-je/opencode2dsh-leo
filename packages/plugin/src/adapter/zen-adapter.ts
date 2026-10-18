@@ -264,9 +264,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Normalize pi-ai's mixed reasoning shapes before a Responses request. */
-export function normalizeResponsesPayload(payload: unknown, requestedEffort?: string): unknown | undefined {
-  const shaped = ensureFreeLaneShape(payload)
+/**
+ * Normalize pi-ai's mixed reasoning shapes before a Responses request.
+ *
+ * `freeLaneShape: false` (paid lane) skips the anonymous-lane body gate: that
+ * gate exists only because the upstream 403s anonymous bodies without it.
+ */
+export function normalizeResponsesPayload(
+  payload: unknown,
+  requestedEffort?: string,
+  options: { freeLaneShape?: boolean } = {},
+): unknown | undefined {
+  const shaped = options.freeLaneShape === false ? undefined : ensureFreeLaneShape(payload)
   const base = shaped ?? payload
   if (!isRecord(base)) return shaped
 
@@ -292,6 +301,13 @@ export class ZenAdapter {
   readonly #firstEventMs: number
   readonly #bodyIdleMs: number
   readonly #responsesBodyIdleMs: number
+  readonly #credential?: () => string | undefined
+
+  /** This request's credential: the user's key when set, else the anonymous literal. */
+  #apiKey(): string {
+    const key = this.#credential?.()
+    return key !== undefined && key.length > 0 ? key : ANONYMOUS_KEY
+  }
 
   constructor(catalog: CatalogLike, options: {
     zenBaseUrl?: string
@@ -301,11 +317,20 @@ export class ZenAdapter {
     bodyIdleMs?: number
     /** Overrides RESPONSES_BODY_IDLE_MS (watchdog tests inject short ones). */
     responsesBodyIdleMs?: number
+    /**
+     * Live OpenCode Zen API key (the `credential.apiKey` settings value). Read
+     * per request, never cached: empty/undefined keeps the anonymous lane
+     * (`public` + body-shape gate); a key switches to the paid lane (real
+     * credential, no free-lane body shaping — that gate exists only because the
+     * upstream 403s anonymous bodies without it).
+     */
+    credential?: () => string | undefined
   } = {}) {
     this.#catalog = catalog
     this.#firstEventMs = options.firstEventMs ?? DEFAULT_FIRST_EVENT_MS
     this.#bodyIdleMs = options.bodyIdleMs ?? DEFAULT_BODY_IDLE_MS
     this.#responsesBodyIdleMs = options.responsesBodyIdleMs ?? RESPONSES_BODY_IDLE_MS
+    this.#credential = options.credential
     if (options.providerOverride !== undefined) {
       this.#provider = options.providerOverride as never
       this.#responsesProvider = null
@@ -314,8 +339,8 @@ export class ZenAdapter {
     const baseUrl = `${(options.zenBaseUrl ?? ZEN_BASE_URL).replace(/\/+$/, '')}/v1`
     const auth = {
       apiKey: {
-        name: 'OpenCode Zen anonymous lane',
-        resolve: async () => ({ auth: { apiKey: ANONYMOUS_KEY } }),
+        name: 'OpenCode Zen',
+        resolve: async () => ({ auth: { apiKey: this.#apiKey() } }),
       },
     }
     this.#provider = createProvider<Api>({
@@ -708,16 +733,25 @@ export class ZenAdapter {
     // seam carries the selected reasoning effort: pi-ai has no option with the
     // wire semantics this lane needs (selected off must SEND `none`, not omit),
     // so the effort rides the payload rewrite instead.
+    //
+    // The body gate follows the credential: it exists for the anonymous lane
+    // only, and a paid key must not get fake bash/read tools injected into its
+    // requests (a model could then call them for real).
+    const apiKey = this.#apiKey()
+    const freeLane = apiKey === ANONYMOUS_KEY
     const onPayload =
       isResponses
         ? (payload: unknown): unknown => {
-            const normalized = normalizeResponsesPayload(payload, responseReasoning)
+            const normalized = normalizeResponsesPayload(payload, responseReasoning, { freeLaneShape: freeLane })
+            if (!freeLane) return normalized ?? payload
             return ensureResponsesFreeLaneShape(normalized ?? payload) ?? normalized
           }
         : effortWire === undefined
-        ? ensureFreeLaneShape
+        ? freeLane
+          ? ensureFreeLaneShape
+          : (payload: unknown): unknown => payload
         : (payload: unknown): unknown => {
-            const shaped = ensureFreeLaneShape(payload)
+            const shaped = freeLane ? ensureFreeLaneShape(payload) : payload
             if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return shaped
             return { ...((shaped ?? payload) as Record<string, unknown>), reasoning_effort: effortWire }
           }
@@ -726,7 +760,7 @@ export class ZenAdapter {
       ? this.#responsesProvider
       : this.#provider
     return provider.streamSimple(model, context as unknown as Context, {
-      apiKey: ANONYMOUS_KEY,
+      apiKey,
       sessionId: ids.session,
       headers: disguiseHeaders(ids),
       onPayload,
@@ -751,6 +785,9 @@ export class ZenAdapter {
 }
 
 /** Build the adapter over a live catalog. */
-export function createZenAdapter(catalog: ModelCatalog): ZenAdapter {
-  return new ZenAdapter(catalog)
+export function createZenAdapter(
+  catalog: ModelCatalog,
+  options: { credential?: () => string | undefined } = {},
+): ZenAdapter {
+  return new ZenAdapter(catalog, options)
 }

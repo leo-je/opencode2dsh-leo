@@ -6,7 +6,7 @@ import { writeFile } from 'node:fs/promises'
 import { ModelCatalog, defaultCachePath, type CatalogSnapshot } from './adapter/catalog.ts'
 import { ZenAdapter, PROVIDER_ID } from './adapter/zen-adapter.ts'
 import { AgentProcess, type ReadyInfo } from './agent-process.ts'
-import { Config, configPaths, ensureToken, ordinaryConfig, resolveConfig, writeAgentConfig, type Opencode2dshConfig, type ResolvedPluginConfig } from './config.ts'
+import { Config, configPaths, ensureToken, normalizeZenApiKey, ordinaryConfig, resolveConfig, writeAgentConfig, type CredentialSettings, type Opencode2dshConfig, type ResolvedPluginConfig } from './config.ts'
 import { applyIpPoolSettings } from './ip-pool-settings/apply.ts'
 import { readVolatile, type IpPoolSettings } from './ip-pool-settings/namespace.ts'
 import { fetchHealth, fetchModels, registerProvider, removeProviderRoute } from './provider.ts'
@@ -21,9 +21,9 @@ import { fetchHealth, fetchModels, registerProvider, removeProviderRoute } from 
  *    spawn the Go agent, wait for READY, register the llm-pi-ai provider
  *    route, schedule model refresh.
  *
- * Settings: the editable surface is the `ipPool` field of {@link Config},
- * marked volatile. DSH 0.1.7 serves it under this entry's Loader id and
- * commits saves into the same reference, announcing them with
+ * Settings: the editable surface is the `ipPool` and `credential` fields of
+ * {@link Config}, both marked volatile. DSH serves them under this entry's
+ * Loader id and commits saves into the same references, announcing them with
  * `loader/volatile-update`; there is no `ctx.settings.register()`.
  *
  * dispose(): stop timers/catalog, terminate the agent tree (sidecar mode).
@@ -69,8 +69,9 @@ export const name = 'opencode2dsh'
 export { Config } from './config.ts'
 /**
  * Only `llm` gates this fiber, because adapter mode (the shipped default) uses
- * nothing else: the Zen lane's credential is the literal `'public'`, and the
- * ip-pool settings ride the `Config` volatile reference. DSH 0.1.7 composes
+ * nothing else: the Zen lane's credential is either the anonymous literal or
+ * the settings-supplied key, and both the ip-pool and API-key settings ride the
+ * `Config` volatile references. DSH 0.1.7 composes
  * `ctx.settings` as `SettingsForms`, which itself injects
  * `['configEditor', 'profileContext']` and ships disabled wherever no
  * `profileContext` exists (headless/CLI) — demanding it here kept the whole
@@ -86,7 +87,16 @@ export function apply(ctx: PluginContext, config: ResolvedPluginConfig | Opencod
   const mode = resolveConfig(config as Opencode2dshConfig).mode
   // Cordis accepts disposal effects; readiness objects are invalid effects.
   if (mode === 'sidecar') applySidecar(ctx, config as Opencode2dshConfig)
-  else applyAdapter(ctx, resolved, () => readVolatile<IpPoolSettings>(resolved.ipPool))
+  else {
+    applyAdapter(
+      ctx,
+      resolved,
+      () => readVolatile<IpPoolSettings>(resolved.ipPool),
+      // Read per request, never cached: a settings save must take effect on the
+      // very next stream, not after a plugin reload.
+      () => normalizeZenApiKey(readVolatile<CredentialSettings | undefined>(resolved.credential)?.apiKey),
+    )
+  }
 }
 
 /**
@@ -98,6 +108,7 @@ function applyAdapter(
   ctx: PluginContext,
   config: ResolvedPluginConfig,
   readIpPool: () => Partial<IpPoolSettings> | undefined,
+  readCredential: () => string | undefined,
 ): { ready: Promise<{ port: number; version: string }> } {
   const logger = ctx.logger
   // Strip the volatile reference before the plain config resolution: it is an
@@ -137,6 +148,7 @@ function applyAdapter(
   const catalog = new ModelCatalog({
     refreshSeconds: cfg.refreshSeconds,
     cachePath: defaultCachePath(dataDir),
+    credential: readCredential,
     onRefresh: (status, lastError) => {
       if (disposed) return
       writeStatus(status, lastError)
@@ -160,6 +172,7 @@ function applyAdapter(
     firstEventMs: cfg.firstEventMs,
     bodyIdleMs: cfg.bodyIdleMs,
     responsesBodyIdleMs: cfg.responsesBodyIdleMs,
+    credential: readCredential,
   })
 
   // Register FIRST: the provider must appear in the selector right away. The
@@ -182,8 +195,31 @@ function applyAdapter(
   // fiber. The probe-model dropdown rows include the live catalog, so this
   // must run after the catalog instance exists — and it is fenced, because the
   // route above is already live and must survive anything this layer throws.
+  // A settings save on this entry announces ALL of its volatile nodes through
+  // the same `loader/volatile-update` event, so the ip-pool listener is the only
+  // hook into `credential` changes too. Re-fetch the catalog only when the key
+  // actually changed: an ip-pool save must not cost an extra S1+S2 round.
+  let lastCredential = readCredential()
+  const onVolatileUpdate = (): void => {
+    const next = readCredential()
+    if (next === lastCredential) return
+    const hadKey = lastCredential !== undefined
+    lastCredential = next
+    if (next === undefined) {
+      logger.info('opencode2dsh: API key cleared; the anonymous free lane is back in force')
+    } else {
+      logger.info(`opencode2dsh: API key ${hadKey ? 'changed' : 'set'}; refreshing the model catalog for the paid lane`)
+    }
+    void catalog.refreshOnce().catch((err) => {
+      logger.warn(`opencode2dsh: catalog refresh after key change failed: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }
+
   try {
-    applyIpPoolSettings(ctx, ordinary, readIpPool, logger, { listLiveModels: () => catalog.list() })
+    applyIpPoolSettings(ctx, ordinary, readIpPool, logger, {
+      listLiveModels: () => catalog.list(),
+      onVolatileUpdate,
+    })
   } catch (err) {
     logger.error(`opencode2dsh: ip-pool settings wiring failed; the provider route stays direct: ${err instanceof Error ? err.message : String(err)}`)
   }

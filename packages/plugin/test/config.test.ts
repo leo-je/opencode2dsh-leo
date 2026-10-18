@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { configPaths, ensureToken, resolveConfig, writeAgentConfig, defaults } from '../src/config.ts'
+import { configPaths, ensureToken, normalizeZenApiKey, resolveConfig, writeAgentConfig, defaults } from '../src/config.ts'
 
 test('resolveConfig fills defaults and keeps overrides', () => {
   const base = resolveConfig()
@@ -94,4 +94,31 @@ test('Config declares and bounds the stream watchdog windows, undefined when uns
   // plain ordinary half apply() hands it, untouched by `defaults`.
   assert.equal(resolveConfig({ firstEventMs: 300 }).firstEventMs, 300)
   assert.equal(resolveConfig().firstEventMs, undefined)
+})
+
+test('credential is a volatile secret node, and absent means the anonymous lane', () => {
+  // Nothing configured: the schema default is `{}` (the Loader may also leave
+  // the node undefined on a host that never materialized it), so "no key" is
+  // the absent field, never an empty-object special case.
+  assert.equal(Config({}).credential.get()?.apiKey, undefined)
+  assert.equal(Config({ credential: { apiKey: 'sk-live' } }).credential.get()?.apiKey, 'sk-live')
+  // The two schema bits the Host relies on: `volatile` makes it a settings
+  // node, `role('secret')` makes dsh-settings strip the value from every
+  // settings response (so the key never rides a describe() back to a browser).
+  const node = (Config.dict as unknown as {
+    credential: { meta: Record<string, unknown>; dict: { apiKey: { meta: Record<string, unknown> } } }
+  }).credential
+  assert.equal(node.meta.volatile, true)
+  assert.equal(node.dict.apiKey.meta.role, 'secret')
+  // A non-string key is a schema error, not a runtime surprise in the adapter.
+  assert.throws(() => Config({ credential: { apiKey: 42 as unknown as string } }), /credential/)
+})
+
+test('normalizeZenApiKey trims pasted keys and treats blank as "no key"', () => {
+  assert.equal(normalizeZenApiKey('  sk-live  '), 'sk-live')
+  assert.equal(normalizeZenApiKey('Bearer sk-live'), 'sk-live')
+  assert.equal(normalizeZenApiKey('bearer   sk-live'), 'sk-live')
+  assert.equal(normalizeZenApiKey(''), undefined)
+  assert.equal(normalizeZenApiKey('   '), undefined)
+  assert.equal(normalizeZenApiKey(undefined), undefined)
 })

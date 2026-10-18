@@ -55,6 +55,49 @@ export interface Opencode2dshConfig {
    * the cordis.patch.yml seam.
    */
   ipPool?: IpPoolConfig
+  /** OpenCode Zen (paid) API key; empty keeps the anonymous lane. */
+  credential?: CredentialSettings
+}
+
+/**
+ * The plugin's only secret: the OpenCode Zen API key.
+ *
+ * Kept a separate volatile node from `ipPool` so the settings card can write
+ * `['credential','apiKey']` on its own without marking the ip-pool form dirty,
+ * and so `role('secret')` scopes redaction to exactly this field.
+ */
+export interface CredentialSettings {
+  /**
+   * Paid lane key. Unset/empty means the original anonymous behavior
+   * (`Authorization: Bearer public`, free models only); set means requests use
+   * `Authorization: Bearer <key>` and the paid catalog is served.
+   */
+  apiKey?: string
+}
+
+/**
+ * Wire shape of the credential form: one write-only string.
+ *
+ * `role('secret')` is the load-bearing bit — dsh-settings strips such fields
+ * from every projected value (`describe({redactSecrets:true})`) and records
+ * only `{path, set}`, so the browser can write the key but never read it back.
+ * No `.default('')`: an unset key must stay absent so "no key" is
+ * distinguishable from "empty key" in the persisted profile.
+ */
+export const CredentialSchema = Schema.object({
+  apiKey: Schema.string().role('secret').description('OpenCode Zen API key (empty = free anonymous lane)'),
+})
+
+/**
+ * Normalize a key typed/pasted by a human: trim whitespace and a pasted
+ * `Bearer ` prefix (common when copying from curl docs). Empty => undefined,
+ * i.e. back to the anonymous lane.
+ */
+export function normalizeZenApiKey(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim()
+  if (!trimmed) return undefined
+  const bare = trimmed.replace(/^bearer\s+/i, '').trim()
+  return bare.length > 0 ? bare : undefined
 }
 
 /** docs/ip-pool.md section 5.1 schema (subset owned by config today). */
@@ -121,11 +164,12 @@ export function resolveConfig(config: Opencode2dshConfig = {}): ResolvedConfig {
  * the served namespace from the Loader entry id. Two consequences drive this
  * shape:
  *
- *  - `ipPool` is ONE `.volatile()` node, so the entire ip-pool subtree is the
- *    settings form (dsh-settings' `volatileForm()` selects a node's whole plain
- *    schema once that node is volatile). Nesting `.volatile()` deeper is a hard
- *    schemastery error, and per-field marks would also fragment the card's
- *    form value into siblings instead of one `ipPool` object.
+ *  - `ipPool` and `credential` are the `.volatile()` nodes, i.e. the whole
+ *    settings form (dsh-settings' `volatileForm()` walks the root object and
+ *    collects each volatile child's plain schema, so both arrive as one form
+ *    value: `{ ipPool: {...}, credential: {...} }`). Nesting `.volatile()`
+ *    deeper is a hard schemastery error, and per-field marks would also
+ *    fragment the card's form value into siblings instead of top-level objects.
  *  - every other field is ORDINARY configuration. `volatileForm()` drops it
  *    from the form, which is the intent: these are set by the composition
  *    (`cordis.patch.yml`) or a hand-edited profile patch, never by the card.
@@ -164,30 +208,34 @@ export const Config = Schema.object({
   responsesBodyIdleMs: Schema.number().step(1).min(1).max(600_000),
   /** The ip-pool settings form (docs/ip-pool.md §5.1); served as this entry. */
   ipPool: IpPoolConfigSchema.volatile(),
+  /** The write-only API-key form (see {@link CredentialSchema}). */
+  credential: CredentialSchema.volatile(),
 })
 
 /**
  * What `apply()` receives once the Loader has resolved {@link Config}.
  *
- * `ipPool` is a STABLE reference, not a value: the Loader commits a settings
- * save into the same object and announces it with `loader/volatile-update`, so
- * consumers read `.get()` at the moment they need a snapshot and never cache
- * the object it returned.
+ * `ipPool`/`credential` are STABLE references, not values: the Loader commits a
+ * settings save into the same objects and announces it with
+ * `loader/volatile-update`, so consumers read `.get()` at the moment they need a
+ * snapshot and never cache the object it returned.
  */
-export interface ResolvedPluginConfig extends Omit<ResolvedConfig, 'ipPool'> {
+export interface ResolvedPluginConfig extends Omit<ResolvedConfig, 'ipPool' | 'credential'> {
   ipPool: VolatileRef<IpPoolSettings>
+  /** `get()` may answer undefined until the Loader materializes an object. */
+  credential: VolatileRef<CredentialSettings | undefined>
 }
 
-/** Every field except the volatile ip-pool reference. */
-export type OrdinaryPluginConfig = Omit<ResolvedPluginConfig, 'ipPool'>
+/** Every field except the volatile settings references. */
+export type OrdinaryPluginConfig = Omit<ResolvedPluginConfig, 'ipPool' | 'credential'>
 
 /**
  * The ordinary half of a resolved config, for the call sites that reconfigure
  * the pool runtime and need a plain object. Spreading the whole config instead
- * would hand `startIpPool` the volatile reference where it expects values.
+ * would hand `startIpPool` the volatile references where it expects values.
  */
 export function ordinaryConfig(config: ResolvedPluginConfig): OrdinaryPluginConfig {
-  const { ipPool: _ipPool, ...ordinary } = config
+  const { ipPool: _ipPool, credential: _credential, ...ordinary } = config
   return ordinary
 }
 

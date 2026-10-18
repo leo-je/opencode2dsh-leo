@@ -250,6 +250,14 @@ export interface CatalogOptions {
   onRefresh?: (status: CatalogSnapshot, lastError: string) => void
   /** Delay between startup retries while the live catalog is empty (default 15s). */
   startupRetryMs?: number
+  /**
+   * Live OpenCode Zen API key (the `credential.apiKey` settings value), read on
+   * every refresh and never cached here: unset/empty keeps the anonymous lane
+   * (`Bearer public`, free models only); a key fetches the same S1 roster with
+   * `Bearer <key>` and switches the catalog to the paid lane, where every
+   * listed model is exposed instead of only the free-cost subset.
+   */
+  credential?: () => string | undefined
 }
 
 const METADATA_REFRESH_MS = 24 * 60 * 60 * 1000
@@ -260,6 +268,8 @@ const FETCH_TIMEOUT_MS = 30_000
  * refresh loop. All state is in-memory; only the models.dev cache persists.
  *
  * Decision chain (design.md 4.1/4.2, with the deprecation-first fix):
+ *   0. paid lane — a user key was accepted by S1: every listed id is allowed
+ *      except the local blocklist (no cost filtering)
  *   1. ready metadata verdict — deprecated/paid deny, free cost allows; a
  *      "free" name never overrides a negative metadata verdict
  *   2. metadata cannot speak (pending/missing) — name fallback, or the
@@ -282,6 +292,13 @@ export class ModelCatalog {
   #stopped = false
   #onRefresh?: (status: CatalogSnapshot, lastError: string) => void
   #startupRetryMs: number
+  #credential?: () => string | undefined
+  /**
+   * Whether the last S1 round succeeded WITH a user key. Only then is the paid
+   * lane exposed: an invalid key must degrade to the anonymous catalog instead
+   * of advertising paid models whose inference requests would 401.
+   */
+  #keyAccepted = false
   /** In-flight refresh round (deduped so warm() shares start()'s first fetch). */
   #refreshing: Promise<void> | null = null
 
@@ -294,6 +311,7 @@ export class ModelCatalog {
     this.#now = options.now ?? Date.now
     this.#onRefresh = options.onRefresh
     this.#startupRetryMs = options.startupRetryMs ?? 15_000
+    this.#credential = options.credential
   }
 
   /**
@@ -349,15 +367,37 @@ export class ModelCatalog {
   }
 
   async refreshZen(): Promise<void> {
+    const key = this.#credential?.()
+    let keyError: string | undefined
+    if (key !== undefined && key.length > 0) {
+      try {
+        const ids = await fetchZenModels(this.#zenBaseUrl, this.#fetch, opencodeUserAgent(), key)
+        this.#zen = new Set(ids)
+        this.#keyAccepted = true
+        this.#zenFailed = false
+        this.#updatedAt = this.#now()
+        this.#lastError = ''
+        return
+      } catch (err) {
+        // A key that the models endpoint rejects (expired/typo/revoked) must not
+        // take the free lane down with it: retry anonymously below and keep the
+        // (failed) keyed attempt in lastError for the log.
+        keyError = err instanceof Error ? err.message : String(err)
+        this.#keyAccepted = false
+      }
+    } else {
+      this.#keyAccepted = false
+    }
     try {
       const ids = await fetchZenModels(this.#zenBaseUrl, this.#fetch, opencodeUserAgent())
       this.#zen = new Set(ids)
       this.#zenFailed = false
       this.#updatedAt = this.#now()
-      this.#lastError = ''
+      this.#lastError = keyError === undefined ? '' : `paid lane fetch failed (${keyError}); anonymous lane active`
     } catch (err) {
       this.#zenFailed = true
-      this.#lastError = err instanceof Error ? err.message : String(err)
+      const anonymousError = err instanceof Error ? err.message : String(err)
+      this.#lastError = keyError === undefined ? anonymousError : `paid lane fetch failed (${keyError}); anonymous: ${anonymousError}`
     }
   }
 
@@ -424,11 +464,25 @@ export class ModelCatalog {
     }
   }
 
+  /**
+   * Whether the paid lane is live: a key is configured AND the last S1 round
+   * with it succeeded. Read-only diagnostic (and what decision()/list() gate on).
+   */
+  get paidLane(): boolean {
+    return this.#keyAccepted
+  }
+
   decision(model: string): AnonymousDecision {
     // Issue #56: the live chat lane can never serve a blocklisted id (410
     // delisted / 400 unavailable / 403 region) — deny before any metadata or
     // S3 vouch, so a stale cache or the bootstrap list cannot resurrect it.
+    // Kept for the paid lane too: "works anonymously" is not evidence about
+    // these ids, so do not advertise them just because a key is present.
     if (FREE_LANE_BLOCKLIST.has(model)) return { allowed: false, source: 'local_blocklist', known: true }
+    // Paid lane: a key was accepted by S1, so cost-based filtering no longer
+    // applies — the whole listed roster is served. This is the one branch that
+    // differs from the anonymous lane.
+    if (this.#keyAccepted) return { allowed: true, source: 'paid_lane', known: true }
     const metadata = decide(model, this.#prices, this.#pricesReady)
     // The S3 vouch only covers ids metadata cannot speak for. A metadata
     // verdict of deprecated is Known, but S3 entries are compile-time verified
@@ -520,16 +574,23 @@ async function withTimeout(promise: Promise<Response>, timeoutMs = FETCH_TIMEOUT
   }
 }
 
-/** S1: fetchModels (models.go:587-618) with the CLI disguise headers. */
+/**
+ * S1: fetchModels (models.go:587-618) with the CLI disguise headers.
+ *
+ * `apiKey` unset/empty keeps the anonymous lane's literal `Bearer public`; a
+ * user key replaces only the authorization header (the disguise headers are
+ * unchanged — they describe the client, not the credential).
+ */
 export async function fetchZenModels(
   zenBaseUrl: string,
   fetchImpl: typeof fetch,
   userAgent: string,
+  apiKey?: string,
 ): Promise<string[]> {
   const response = await withTimeout(
     fetchImpl(`${zenBaseUrl.replace(/\/+$/, '')}/v1/models`, {
       headers: {
-        authorization: 'Bearer public',
+        authorization: `Bearer ${apiKey !== undefined && apiKey.length > 0 ? apiKey : 'public'}`,
         'user-agent': userAgent,
         'x-opencode-client': 'cli',
         accept: 'application/json',

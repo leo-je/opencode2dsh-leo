@@ -483,6 +483,46 @@ test('Responses streams pass a valid reasoning option and sanitize the payload',
   assert.deepEqual((payload.tools as Array<{ name: string }>).map((tool) => tool.name), ['bash', 'read'])
 })
 
+test('a settings key replaces the anonymous literal and retires the free-lane body gate', async () => {
+  const seen: Array<{ apiKey?: string; payload?: Record<string, unknown> }> = []
+  const provider = {
+    streamSimple(_model: unknown, _context: unknown, options: { apiKey?: string; onPayload?: (payload: unknown) => unknown }) {
+      // A completions body: `messages` is what the free-lane shaper keys on, and
+      // it answers undefined when there is nothing to inject (pi-ai then sends
+      // the original body), so the test mirrors that contract.
+      const body = { messages: [], stream: false } as Record<string, unknown>
+      const rewritten = options.onPayload?.(body) as Record<string, unknown> | undefined
+      seen.push({ apiKey: options.apiKey, payload: rewritten ?? body })
+      return (async function* () {
+        yield { type: 'start' }
+        yield { type: 'done', message: { stopReason: 'stop', content: [], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }
+      })()
+    },
+  }
+  const catalog = {
+    list: () => ['big-pickle'],
+    decision: () => ({ allowed: true, source: 'test', known: true }),
+    reasoningCapability: () => undefined,
+  }
+  const keyed = new ZenAdapter(catalog, { providerOverride: provider, credential: () => 'sk-live' })
+  for await (const chunk of keyed.stream({ provider: 'opencode2dsh', model: 'big-pickle', messages: [] })) void chunk
+  assert.equal(seen[0]?.apiKey, 'sk-live')
+  // The paid lane keeps the caller's body: no fake bash/read tools, no forced
+  // stream. Injecting them would let a model actually call them.
+  assert.equal(seen[0]?.payload?.stream, false)
+  assert.equal(seen[0]?.payload?.tools, undefined)
+
+  const anonymous = new ZenAdapter(catalog, { providerOverride: provider })
+  for await (const chunk of anonymous.stream({ provider: 'opencode2dsh', model: 'big-pickle', messages: [] })) void chunk
+  assert.equal(seen[1]?.apiKey, 'public', 'no key configured = the anonymous lane, unchanged')
+  // The gate tools are the anonymous lane's load-bearing shape (403 without them).
+  assert.deepEqual(
+    (seen[1]?.payload?.tools as Array<{ function?: { name?: string } }>).map((tool) => tool.function?.name),
+    ['bash', 'read'],
+  )
+  assert.equal(seen[1]?.payload?.tool_choice, 'none')
+})
+
 test('the wire request carries the canonical session the free-lane gate requires (issue #56)', async () => {
   let headers: Record<string, string> | undefined
   const provider = {
