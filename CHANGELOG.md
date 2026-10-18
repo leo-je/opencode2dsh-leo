@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 (2026-10-19)
+
+### Changed
+
+- **Renamed to `opencode2dsh-leo`, and published under a new npm scope.** The package is now `@opencode2dsh-leo/dsh-plugin` (was `@opencode2dsh/dsh-plugin`), the registered provider id is `opencode2dsh-leo` (was `opencode2dsh`), the settings namespace and the client's IP-pool bridge prefix (`/api/opencode2dsh-leo/ip-pool`) moved with it, and the on-disk cache directory is `~/.opencode2dsh-leo` (was `~/.opencode2dsh`). Because the settings namespace *is* the Loader entry id, an existing install must rename the `id:`/`name:` pair on the plugin row in `cordis.patch.yml` **and** update the `provider:` the default model routes through, in the same edit — changing only one leaves the plugin mounted but the chat model unroutable until it is fixed. No user configuration is lost in the move: the plugin row's `config:` object (ip-pool URLs, the optional Zen key) carries over verbatim. This is a breaking change for anyone scripting against the old provider id or path; there is no compatibility shim.
+- Version bumped past 0.3.x because the rename makes the identity a breaking change for downstream consumers, not because the runtime behavior changed. Everything below 0.3.12's `Fixed` section still applies unchanged.
 
 ### Added
 

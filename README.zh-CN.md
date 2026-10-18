@@ -7,13 +7,35 @@
 无需 API Key。无需注册。无需额外进程。
 
 [![npm](https://img.shields.io/npm/v/@opencode2dsh-leo%2Fdsh-plugin)](https://www.npmjs.com/package/@opencode2dsh-leo/dsh-plugin)
-[![license](https://img.shields.io/npm/l/@opencode2dsh-leo%2Fdsh-plugin)](https://github.com/FishBottle7/opencode2dsh/blob/master/LICENSE)
+[![license](https://img.shields.io/npm/l/@opencode2dsh-leo%2Fdsh-plugin)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://github.com/FishBottle7/opencode2dsh)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://www.npmjs.com/package/@deepseek-ai/dsh)
 
 [English](README.md) | 简体中文
 
 </div>
+
+---
+
+> ### 关于本 fork
+>
+> `opencode2dsh-leo` 是 **[FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh)** 的 fork，
+> 上游以 [`@opencode2dsh/dsh-plugin`](https://www.npmjs.com/package/@opencode2dsh/dsh-plugin) 发布。
+> 原始设计与实现全部归功于 [@FishBottle7](https://github.com/FishBottle7)；
+> 上游项目使用 MIT 许可，本 fork 沿用同一许可。
+>
+> 本 fork 由 [@leo-je](https://github.com/leo-je) 维护，以 `@opencode2dsh-leo/dsh-plugin` 发布。
+> 与上游的差异：
+>
+> - **标识全量改名。** 包名、npm scope、注册的 provider id、设置 namespace、
+>   IP 池 bridge 前缀、本机缓存目录都带上 `-leo` 后缀，因此本 fork 与上游插件
+>   **可以并存安装**，不会互相覆盖设置。迁移注意事项见
+>   [CHANGELOG.md](CHANGELOG.md)——对任何脚本里写死了旧 provider id 的人来说，
+>   这次改名是破坏性变更。
+> - **可选的 OpenCode Zen API Key。** 在匿名免费通道之上增加一条可选付费通道。
+>
+> 本 fork 的 issue 与 PR 请提到这里；如果某个问题在上游原版插件上同样复现，
+> 建议提到[上游仓库](https://github.com/FishBottle7/opencode2dsh/issues)。
 
 ---
 
@@ -52,8 +74,8 @@ dsh plugin --profile web add @opencode2dsh-leo/dsh-plugin
 **从源码安装**（自行打包）：
 
 ```sh
-git clone https://github.com/FishBottle7/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+git clone https://github.com/leo-je/opencode2dsh-leo.git
+cd opencode2dsh-leo/packages/plugin
 pnpm install && pnpm pack
 dsh plugin --profile web add ./opencode2dsh-leo-dsh-plugin-<version>.tgz
 ```
@@ -162,8 +184,8 @@ https://opencode.ai/zen/v1        ← Authorization: Bearer public
 ## 开发
 
 ```sh
-git clone https://github.com/FishBottle7/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+git clone https://github.com/leo-je/opencode2dsh-leo.git
+cd opencode2dsh-leo/packages/plugin
 pnpm install
 pnpm typecheck && pnpm test
 pnpm build                    # 打包到 lib/
@@ -194,4 +216,4 @@ pnpm build                    # 打包到 lib/
 
 ## 许可证
 
-[MIT](./LICENSE) © FishBottle7
+[MIT](./LICENSE) © FishBottle7（上游）与 opencode2dsh-leo fork 贡献者

@@ -1,6 +1,6 @@
 {
   "name": "@opencode2dsh-leo/dsh-plugin",
-  "version": "0.3.12",
+  "version": "1.0.0",
   "description": "Free OpenCode Zen models for DeepSeek Harness (DSH): native dsh-llm adapter plugin, no API key.",
   "type": "module",
   "main": "lib/index.js",
@@ -20,11 +20,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FishBottle7/opencode2dsh.git"
+    "url": "git+https://github.com/leo-je/opencode2dsh-leo.git"
   },
-  "homepage": "https://github.com/FishBottle7/opencode2dsh#readme",
-  "bugs": "https://github.com/FishBottle7/opencode2dsh/issues",
-  "author": "FishBottle7 (https://github.com/FishBottle7)",
+  "homepage": "https://github.com/leo-je/opencode2dsh-leo#readme",
+  "bugs": "https://github.com/leo-je/opencode2dsh-leo/issues",
+  "author": "FishBottle7 (https://github.com/FishBottle7); fork maintained by leo-je (https://github.com/leo-je)",
   "engines": {
     "node": ">=20"
   },

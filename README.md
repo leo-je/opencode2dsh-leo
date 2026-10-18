@@ -7,13 +7,39 @@
 No API key. No registration. No extra process.
 
 [![npm](https://img.shields.io/npm/v/@opencode2dsh-leo%2Fdsh-plugin)](https://www.npmjs.com/package/@opencode2dsh-leo/dsh-plugin)
-[![license](https://img.shields.io/npm/l/@opencode2dsh-leo%2Fdsh-plugin)](https://github.com/FishBottle7/opencode2dsh/blob/master/LICENSE)
+[![license](https://img.shields.io/npm/l/@opencode2dsh-leo%2Fdsh-plugin)](./LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://github.com/FishBottle7/opencode2dsh)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://www.npmjs.com/package/@deepseek-ai/dsh)
 
 English | [简体中文](README.zh-CN.md)
 
 </div>
+
+---
+
+> ### Fork notice
+>
+> `opencode2dsh-leo` is a fork of **[FishBottle7/opencode2dsh](https://github.com/FishBottle7/opencode2dsh)**,
+> which publishes the upstream plugin as [`@opencode2dsh/dsh-plugin`](https://www.npmjs.com/package/@opencode2dsh/dsh-plugin).
+> All credit for the original design and implementation goes to
+> [@FishBottle7](https://github.com/FishBottle7); the upstream project is MIT-licensed
+> and this fork keeps the same license.
+>
+> This fork is maintained by [@leo-je](https://github.com/leo-je) and is published as
+> `@opencode2dsh-leo/dsh-plugin`. What differs from upstream:
+>
+> - **Renamed identity.** The package, the npm scope, the registered provider id, the
+>   settings namespace, the IP-pool bridge prefix, and the on-disk cache directory all
+>   carry the `-leo` suffix, so this fork and the upstream plugin can be installed
+>   side by side without shadowing each other's settings. See
+>   [CHANGELOG.md](CHANGELOG.md) for the migration note — the rename is a breaking
+>   change for anyone scripting against the old provider id.
+> - **Optional OpenCode Zen API key.** An opt-in paid lane on top of the anonymous
+>   free lane.
+>
+> Bug reports and pull requests for this fork belong here; issues in upstream code
+> that also reproduce on the original plugin are best reported
+> [upstream](https://github.com/FishBottle7/opencode2dsh/issues).
 
 ---
 
@@ -54,8 +80,8 @@ dsh plugin --profile web add @opencode2dsh-leo/dsh-plugin
 **From source** (build the tarball yourself):
 
 ```sh
-git clone https://github.com/FishBottle7/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+git clone https://github.com/leo-je/opencode2dsh-leo.git
+cd opencode2dsh-leo/packages/plugin
 pnpm install && pnpm pack
 dsh plugin --profile web add ./opencode2dsh-leo-dsh-plugin-<version>.tgz
 ```
@@ -174,8 +200,8 @@ The plugin writes a health snapshot after every refresh round:
 ## Development
 
 ```sh
-git clone https://github.com/FishBottle7/opencode2dsh.git
-cd opencode2dsh/packages/plugin
+git clone https://github.com/leo-je/opencode2dsh-leo.git
+cd opencode2dsh-leo/packages/plugin
 pnpm install
 pnpm typecheck && pnpm test
 pnpm build                    # bundle to lib/
@@ -208,4 +234,4 @@ Releasing: `pnpm pack` in `packages/plugin` (prepack builds and syncs docs).
 
 ## License
 
-[MIT](./LICENSE) © FishBottle7
+[MIT](./LICENSE) © FishBottle7 (upstream) and the opencode2dsh-leo fork contributors
