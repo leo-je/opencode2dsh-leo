@@ -23,3 +23,20 @@ test('an ordinary pool edit keeps unrelated configuration outside its paths', ()
   assert.ok(edit)
   assert.deepEqual(poolWriteOps([edit]), [{ op: 'set', path: ['ipPool', 'manual'], value: ['http://127.0.0.1:7897'] }])
 })
+
+test('a models-node edit addresses the models node, not ipPool', () => {
+  // Regression guard: poolWriteOps used to hardcode the `ipPool` prefix, which
+  // would land the filter on a path the host rejects (freeOnly is not an
+  // ipPool field) and take the whole save batch down with it.
+  const edit = fieldWrite('freeOnly', false, true, true)
+  assert.ok(edit)
+  assert.deepEqual(poolWriteOps([edit], 'models'), [{ op: 'set', path: ['models', 'freeOnly'], value: false }])
+})
+
+test('the legacy subscriptions alias migration stays pool-only', () => {
+  // The alias lives under ipPool. A models-node write must never drag an
+  // extra unset along, even for a field named `subscription`.
+  const edit = fieldWrite('subscription', { urls: [] }, undefined, undefined)
+  assert.ok(edit)
+  assert.deepEqual(poolWriteOps([edit], 'models'), [{ op: 'set', path: ['models', 'subscription'], value: { urls: [] } }])
+})

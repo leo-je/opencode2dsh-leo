@@ -60,9 +60,13 @@ test('client reads and writes settings through the page-supplied ConfigPageForm'
   assert.ok(source.includes('configForms'), 'the configForms service is used')
   assert.ok(/state\.status/.test(source) || /status === "ready"/.test(source), 'reads the served form state')
   assert.ok(source.includes('.mutate('), 'writes through mutate(ops, revision)')
-  // The served value is the whole entry: the editable section is the `ipPool`
-  // volatile node, so every write path keeps that field in front.
-  assert.ok(/\[\s*"ipPool"\s*,\s*write\.field\s*\]/.test(source), 'write paths nest under the ipPool field')
+  // The served value is the whole entry, and the card now spans TWO volatile
+  // nodes (`ipPool` and `models`), so the path prefix is the node parameter
+  // rather than a hardcoded `ipPool`. The Host rejects a batch whose paths
+  // fall outside the declared volatile nodes, which is why the prefix must
+  // come from the caller and not be assumed.
+  assert.ok(/\[\s*node\s*,\s*write\.field\s*\]/.test(source), 'write paths take their node prefix as a parameter')
+  assert.ok(source.includes('"models"') && source.includes('"ipPool"'), 'both volatile nodes are named')
   assert.ok(/\[\s*IP_POOL_FIELD\s*,\s*"pinnedExitId"\s*\]/.test(source), 'pinned-exit write nests under ipPool too')
   // The save control belongs to the shared form chrome, not this page.
   assert.ok(source.includes('SettingsForm'), 'the page renders inside the shared form chrome')

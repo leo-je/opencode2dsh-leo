@@ -371,8 +371,74 @@ test('a settings key unlocks the paid roster; clearing it restores free-only', a
   }
 })
 
-test('a rejected key falls back to the anonymous lane instead of taking the catalog down', async () => {
-  const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+test('models.freeOnly narrows the paid roster back to the free verdict', async () => {
+  // The picker-filter fixture adds the case that makes the two free criteria
+  // differ: a zero-cost id whose NAME carries no "free" (the live big-pickle).
+  const zen = { data: [{ id: 'qwen-free' }, { id: 'paid-model' }, { id: 'pickle' }, { id: 'dead-free' }] }
+  const metadata = {
+    opencode: {
+      models: {
+        'qwen-free': { cost: { input: 0, output: 0 } },
+        'paid-model': { cost: { input: 1, output: 2 } },
+        // free by cost, free by no-name convention: the whole reason the
+        // switch filters on metadata rather than on the id substring
+        pickle: { cost: { input: 0, output: 0 } },
+        // name says free, metadata says deprecated: must stay out of both
+        'dead-free': { status: 'deprecated', cost: { input: 0, output: 0 } },
+      },
+    },
+  }
+  let freeOnly = true
+  const catalog = new ModelCatalog({
+    fetchImpl: fakeFetch({ 'https://opencode.ai/zen/v1/models': zen, 'https://models.dev/api.json': metadata }),
+    credential: () => 'sk-live',
+    freeOnly: () => freeOnly,
+  })
+  try {
+    await catalog.refreshOnce()
+    assert.equal(catalog.paidLane, true, 'the key still opens the paid lane')
+    assert.deepEqual(
+      catalog.list(),
+      ['pickle', 'qwen-free'],
+      'freeOnly=true serves the metadata-free subset, not the name-matched one',
+    )
+    assert.equal(catalog.snapshot().exposed, 2)
+
+    // The switch must be read per list() call, not captured at construction:
+    // index.ts republishes the roster on loader/volatile-update without any
+    // re-fetch, so a cached answer would freeze the picker.
+    freeOnly = false
+    assert.deepEqual(catalog.list(), ['dead-free', 'paid-model', 'pickle', 'qwen-free'], 'freeOnly=false restores the whole paid roster')
+    assert.equal(catalog.snapshot().exposed, 4)
+
+    // decision() is the DISPATCH-facing verdict and stays lane-shaped: the
+    // switch is display-only, so it must not start denying a chosen model.
+    assert.equal(catalog.decision('paid-model').allowed, true, 'freeOnly never gates dispatch')
+    assert.equal(catalog.decision('paid-model').source, 'paid_lane')
+  } finally {
+    catalog.stop()
+  }
+})
+
+test('models.freeOnly is a no-op on the anonymous lane', async () => {
+  // Keyless the roster is already the free subset, which is what makes the
+  // switch safe as a default: flipping it must not change what a keyless
+  // deployment sees.
+  const catalog = new ModelCatalog({
+    fetchImpl: fakeFetch({ 'https://opencode.ai/zen/v1/models': zenBody, 'https://models.dev/api.json': metadataBody }),
+    freeOnly: () => true,
+  })
+  try {
+    await catalog.refreshOnce()
+    assert.equal(catalog.paidLane, false)
+    assert.deepEqual(catalog.list(), ['qwen-free'], 'same free roster the unfiltered anonymous lane serves')
+    assert.equal(catalog.decision('paid-model').allowed, false)
+  } finally {
+    catalog.stop()
+  }
+})
+
+test('a rejected key falls back to the anonymous lane instead of taking the catalog down', async () => {  const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
     const target = String(url).replace(/\?.*$/, '')
     if (target.endsWith('/v1/models')) {
       const auth = new Headers(init?.headers).get('authorization')

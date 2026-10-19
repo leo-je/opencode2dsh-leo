@@ -258,6 +258,14 @@ export interface CatalogOptions {
    * listed model is exposed instead of only the free-cost subset.
    */
   credential?: () => string | undefined
+  /**
+   * Live value of the `models.freeOnly` settings switch, read on every `list()`
+   * call and never cached. True narrows the EXPOSED roster back to the free
+   * verdict even while the paid lane is live, so the picker offers the same
+   * nine models a keyless deployment sees. Display only: it never gates
+   * dispatch (see README — an already-chosen paid model keeps streaming).
+   */
+  freeOnly?: () => boolean
 }
 
 const METADATA_REFRESH_MS = 24 * 60 * 60 * 1000
@@ -299,6 +307,8 @@ export class ModelCatalog {
    * of advertising paid models whose inference requests would 401.
    */
   #keyAccepted = false
+  /** Live `models.freeOnly` switch; read per list() call, never cached. */
+  #freeOnly?: () => boolean
   /** In-flight refresh round (deduped so warm() shares start()'s first fetch). */
   #refreshing: Promise<void> | null = null
 
@@ -312,6 +322,7 @@ export class ModelCatalog {
     this.#onRefresh = options.onRefresh
     this.#startupRetryMs = options.startupRetryMs ?? 15_000
     this.#credential = options.credential
+    this.#freeOnly = options.freeOnly
   }
 
   /**
@@ -483,6 +494,20 @@ export class ModelCatalog {
     // applies — the whole listed roster is served. This is the one branch that
     // differs from the anonymous lane.
     if (this.#keyAccepted) return { allowed: true, source: 'paid_lane', known: true }
+    return this.#anonymousDecision(model)
+  }
+
+  /**
+   * The anonymous-lane verdict for one model: blocklist, then metadata, then
+   * the S3 vouch.
+   *
+   * Split out of {@link decision} so `list()` can apply it to a paid-lane
+   * roster when `models.freeOnly` asks for the free subset. Sharing the body
+   * is the point: both paths then answer identically, which is what makes the
+   * switch mean "offer exactly what a keyless deployment offers".
+   */
+  #anonymousDecision(model: string): AnonymousDecision {
+    if (FREE_LANE_BLOCKLIST.has(model)) return { allowed: false, source: 'local_blocklist', known: true }
     const metadata = decide(model, this.#prices, this.#pricesReady)
     // The S3 vouch only covers ids metadata cannot speak for. A metadata
     // verdict of deprecated is Known, but S3 entries are compile-time verified
@@ -501,9 +526,13 @@ export class ModelCatalog {
   /** ids exposed to DSH: S1 ∩ allowed, or S3 while the live catalog is pending. */
   list(): string[] {
     if (this.#zen.size === 0) return this.#zenFailed ? [] : staticFreeModels.filter((model) => !FREE_LANE_BLOCKLIST.has(model))
+    // Read per call, never cached: a settings save flips this and the very next
+    // listModels() must answer the new roster (index.ts republishes on
+    // loader/volatile-update).
+    const freeOnly = this.#freeOnly?.() === true
     const out: string[] = []
     for (const model of this.#zen) {
-      if (this.decision(model).allowed) out.push(model)
+      if ((freeOnly ? this.#anonymousDecision(model) : this.decision(model)).allowed) out.push(model)
     }
     return out.sort()
   }

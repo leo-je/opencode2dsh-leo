@@ -56,7 +56,7 @@ nothing to host.
 ## Highlights
 
 - **Zero credential, zero setup** — the anonymous lane needs no key; install, restart, chat
-- **Optional OpenCode Zen API key (paid lane)** — paste a key in the same settings card (write-only, never echoed back); requests then carry `Bearer <key>` and the picker serves the full catalog instead of the free-only roster. Leave it empty and nothing changes.
+- **Optional OpenCode Zen API key (paid lane)** — paste a key in the same settings card (write-only, never echoed back); requests then carry `Bearer <key>`. The picker stays on the free roster until you switch **Show free models only** off. Leave the key empty and nothing changes.
 - **Native adapter, no sidecar** — one npm package, no child process, no binary, no local port (the legacy Go sidecar is not part of the published package; see `legacy/`)
 - **CLI-identical disguise** — requests carry the OpenCode CLI user agent and its session/request/project header set, derived per conversation
 - **Selectable thinking levels** — reasoning-capable free models expose an effort picker in DSH's model selector (declared ladders where the model metadata provides them, Off/Minimal/Low/Medium/High otherwise); Responses-only `muse-spark-*` models expose only upstream-supported effort levels, and no selection keeps the provider default
@@ -119,12 +119,20 @@ Defaults work out of the box. Override via the profile's `cordis.patch.yml`:
 The Zen API key is **not** a `cordis.patch.yml` option — it is a write-only
 settings field. Open **Settings → Plugins → opencode2dsh-leo** (the same card as
 the IP pool), paste the key, Save. Empty keeps the anonymous free lane exactly
-as before; with a key every request carries `Authorization: Bearer <key>` and
-the model picker serves the full live catalog (cost/deprecation filtering is
-what the anonymous lane needs, not you). The key is stripped from every
+as before; with a key every request carries `Authorization: Bearer <key>`. The key is stripped from every
 settings response, so it is never echoed back to the browser. A key the
 endpoint rejects fails requests with the upstream auth error — there is no
 silent downgrade back to the free lane.
+
+The same card carries a **Model list → Show free models only** switch
+(`models.freeOnly`, default **on**). It filters what the picker offers, not what
+you may run: on, the roster is the zero-cost subset (`cost.input === 0 &&
+cost.output === 0`, 9 models today — a criterion that keeps `big-pickle`, whose
+id does not contain "free"); off, the full catalog the key unlocks (44 today).
+It defaults to on so that pasting a key does not silently flood the picker with
+paid models; flip it off to browse them. This is display-only — a session
+already streaming on a paid model is not interrupted, and `decision()`
+deliberately does not gate dispatch on it.
 
 ## How it works
 

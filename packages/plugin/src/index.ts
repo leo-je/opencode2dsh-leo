@@ -6,7 +6,7 @@ import { writeFile } from 'node:fs/promises'
 import { ModelCatalog, defaultCachePath, type CatalogSnapshot } from './adapter/catalog.ts'
 import { ZenAdapter, PROVIDER_ID } from './adapter/zen-adapter.ts'
 import { AgentProcess, type ReadyInfo } from './agent-process.ts'
-import { Config, configPaths, ensureToken, normalizeZenApiKey, ordinaryConfig, resolveConfig, writeAgentConfig, type CredentialSettings, type Opencode2dshLeoConfig, type ResolvedPluginConfig } from './config.ts'
+import { Config, configPaths, ensureToken, normalizeZenApiKey, ordinaryConfig, resolveConfig, writeAgentConfig, type CredentialSettings, type ModelFilterSettings, type Opencode2dshLeoConfig, type ResolvedPluginConfig } from './config.ts'
 import { applyIpPoolSettings } from './ip-pool-settings/apply.ts'
 import { readVolatile, type IpPoolSettings } from './ip-pool-settings/namespace.ts'
 import { fetchHealth, fetchModels, registerProvider, removeProviderRoute } from './provider.ts'
@@ -95,6 +95,9 @@ export function apply(ctx: PluginContext, config: ResolvedPluginConfig | Opencod
       // Read per request, never cached: a settings save must take effect on the
       // very next stream, not after a plugin reload.
       () => normalizeZenApiKey(readVolatile<CredentialSettings | undefined>(resolved.credential)?.apiKey),
+      // Same discipline as the key. An unset node (host too old to serve it)
+      // reads as the schema default, true.
+      () => readVolatile<ModelFilterSettings | undefined>(resolved.models)?.freeOnly ?? true,
     )
   }
 }
@@ -109,6 +112,7 @@ function applyAdapter(
   config: ResolvedPluginConfig,
   readIpPool: () => Partial<IpPoolSettings> | undefined,
   readCredential: () => string | undefined,
+  readFreeOnly: () => boolean,
 ): { ready: Promise<{ port: number; version: string }> } {
   const logger = ctx.logger
   // Strip the volatile reference before the plain config resolution: it is an
@@ -145,27 +149,38 @@ function applyAdapter(
   const catalogSignature = (): string => JSON.stringify(catalog.list().sort().map((id) => [
     id, catalog.limits(id), catalog.modalities(id), catalog.reasoningCapability(id),
   ]))
+  /**
+   * Announce the exposed roster when it actually changed.
+   *
+   * DSH's handle swaps the registration atomically and emits
+   * `llm/adapters-updated`, which invalidates the client's cached roster; the
+   * host caches `listModels` per host generation, so WITHOUT this call a
+   * settings flip stays invisible until a reload. Shared by the refresh round
+   * and the settings path — the roster changes from both.
+   */
+  const publishCatalog = (): void => {
+    const signature = catalogSignature()
+    if (signature === publishedCatalog) return
+    try {
+      const handle = registration as { replace?: (providers: string[]) => void } | undefined
+      if (typeof handle?.replace === 'function') handle.replace([PROVIDER_ID])
+      else if (typeof ctx.emit === 'function') ctx.emit('llm/adapters-updated')
+      else return
+      publishedCatalog = signature
+    } catch (err) {
+      logger.warn(`opencode2dsh-leo: catalog announcement failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
   const catalog = new ModelCatalog({
     refreshSeconds: cfg.refreshSeconds,
     cachePath: defaultCachePath(dataDir),
     credential: readCredential,
+    freeOnly: readFreeOnly,
     onRefresh: (status, lastError) => {
       if (disposed) return
       writeStatus(status, lastError)
       if (lastError) logger.warn(`opencode2dsh-leo: catalog refresh issue: ${lastError}`)
-      const signature = catalogSignature()
-      if (signature === publishedCatalog) return
-      try {
-        // DSH's handle swaps this registration atomically and announces
-        // llm/adapters-updated, which invalidates the client's cached roster.
-        const handle = registration as { replace?: (providers: string[]) => void } | undefined
-        if (typeof handle?.replace === 'function') handle.replace([PROVIDER_ID])
-        else if (typeof ctx.emit === 'function') ctx.emit('llm/adapters-updated')
-        else return
-        publishedCatalog = signature
-      } catch (err) {
-        logger.warn(`opencode2dsh-leo: catalog announcement failed: ${err instanceof Error ? err.message : String(err)}`)
-      }
+      publishCatalog()
     },
   })
   const adapter = new ZenAdapter(catalog, {
@@ -197,10 +212,19 @@ function applyAdapter(
   // route above is already live and must survive anything this layer throws.
   // A settings save on this entry announces ALL of its volatile nodes through
   // the same `loader/volatile-update` event, so the ip-pool listener is the only
-  // hook into `credential` changes too. Re-fetch the catalog only when the key
-  // actually changed: an ip-pool save must not cost an extra S1+S2 round.
+  // hook into `credential` and `models` changes too. Re-fetch the catalog only
+  // when the key actually changed: an ip-pool save must not cost an extra S1+S2
+  // round. The `models.freeOnly` switch needs no re-fetch — it only changes
+  // which already-fetched ids `list()` hands out — so it republishes directly.
   let lastCredential = readCredential()
+  let lastFreeOnly = readFreeOnly()
   const onVolatileUpdate = (): void => {
+    const freeOnly = readFreeOnly()
+    if (freeOnly !== lastFreeOnly) {
+      lastFreeOnly = freeOnly
+      logger.info(`opencode2dsh-leo: model picker filter ${freeOnly ? 'restricted to free models' : 'opened to the full catalog'}`)
+      publishCatalog()
+    }
     const next = readCredential()
     if (next === lastCredential) return
     const hadKey = lastCredential !== undefined

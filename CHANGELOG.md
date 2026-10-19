@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 (2026-10-19)
+
+### Added
+
+- **"Show free models only" picker filter (`models.freeOnly`, default on).** New volatile settings node `models`, exposed in the same card as a checkbox. On, the picker serves only the zero-cost subset — `cost.input === 0 && cost.output === 0`, 9 models today; off, the whole catalog (44 today with a key). The criterion is metadata cost, not the id substring `free`, which is what keeps `big-pickle` in the roster despite its id. It is a third sibling volatile node rather than a field inside `credential` because `credential` is write-only by design (`role('secret')`, no field can be read back) while the checkbox must echo its saved state; `ipPool` was equally unsuitable because its fields are consumed by the pool runtime through `toIpPoolConfig()`.
+- The switch defaults to on so that pasting a Zen key no longer silently floods the picker with 44 models; to browse the paid catalog you now turn the filter off. **This changes the paid-lane UX shipped in 1.0.0** — with a key, the roster stays free-only until you say otherwise.
+- Filtering is **display-only and never gates dispatch**: `decision()` keeps returning the lane-shaped verdict (`paid_lane` for a keyed model), `decisionFor()` remains unused, and a session already streaming on a paid model is not interrupted by narrowing the picker. The catalogue is re-published on `loader/volatile-update` without an extra S1+S2 fetch round, because the switch only changes which ids `list()` hands over.
+- **Upgrading needs a `dsh` restart — hot reload cannot pick this up.** The HMR watcher re-imports plugin bundles when the profile patch or `dsh.profile.bundles` *changes*, and the Loader caches modules by resolved specifier URL. A version bump keeps the specifier (`@opencode2dsh-leo/dsh-plugin`) identical, so the running process keeps the module it evaluated at boot: Node's ESM registry returns the cached namespace and never re-reads the file. Verified by appending a side-effect marker to the installed `lib/index.js` and touching `cordis.patch.yml` — the marker never fired. The 1.0.0 rename did hot-load, but only because the package *name* changed with the version, making it a fresh specifier. Consequence of a half-applied upgrade: the client bundle is read per request (so a browser refresh serves the new card) while the host keeps the old schema, and saving the new checkbox then fails with `Config field "models.freeOnly" is not volatile`. Restart `dsh` after installing a version bump.
+
+### Fixed
+
+- Client write paths are no longer hardcoded to the `ipPool` node. `poolWriteOps(writes, node = 'ipPool')` now builds `<node>.<field>` paths, and the legacy `subscriptions` alias migration is guarded to the pool node only. The Host validates every submitted path against the declared volatile nodes (`isVolatilePath` in `dsh-settings`) and rejects the entire batch on the first offender, so a card that spans two nodes had to stop stamping one node's prefix on the other's fields. Covered by two regression tests.
+- The card's single Save button now groups its edits per volatile node (`CardWrites { ipPool, models }`) and emits two prefixed batches, so a pool-only edit cannot drag a `models.*` path along (or vice versa) and take the save down with it.
+
 ## 1.0.0 (2026-10-19)
 
 ### Changed

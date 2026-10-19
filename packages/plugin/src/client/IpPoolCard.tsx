@@ -132,6 +132,15 @@ const BRIDGE_PREFIX = '/api/opencode2dsh-leo/ip-pool'
 const IP_POOL_FIELD = 'ipPool'
 /** The second volatile node of this entry: the write-only Zen API key. */
 const CREDENTIAL_FIELD = 'credential'
+/** The third: the model-picker display filter. */
+const MODELS_FIELD = 'models'
+
+/**
+ * Default of the `models.freeOnly` switch. Mirrors `ModelFilterSchema`'s
+ * declared default so a deployment whose host serves an empty `models` node
+ * still renders the switch in the same position the host would.
+ */
+const FREE_ONLY_DEFAULT = true
 
 const DEFAULTS: IpPoolSettingsValue = {
   enabled: false,
@@ -168,6 +177,8 @@ interface FormState {
   pinnedStrict: boolean
   probeModels: string[]
   maxConcurrentProbes: string
+  /** The `models.freeOnly` switch (separate volatile node, same Save button). */
+  freeOnly: boolean
 }
 
 function emptyForm(): FormState {
@@ -185,10 +196,11 @@ function emptyForm(): FormState {
     pinnedStrict: DEFAULTS.pinnedStrict,
     probeModels: [],
     maxConcurrentProbes: String(DEFAULTS.maxConcurrentProbes),
+    freeOnly: FREE_ONLY_DEFAULT,
   }
 }
 
-function formFromValue(value: IpPoolSettingsValue): FormState {
+function formFromValue(value: IpPoolSettingsValue, freeOnly: boolean): FormState {
   return {
     enabled: value.enabled,
     freeEnabled: value.free.enabled,
@@ -203,12 +215,29 @@ function formFromValue(value: IpPoolSettingsValue): FormState {
     pinnedStrict: value.pinnedStrict,
     probeModels: [...value.probeModels],
     maxConcurrentProbes: String(value.maxConcurrentProbes),
+    freeOnly,
   }
 }
 
 /** The served entry's value: the `ipPool` volatile node is the whole form. */
 interface ServedEntry {
   ipPool?: Partial<IpPoolSettingsValue>
+  models?: { freeOnly?: boolean }
+}
+
+/**
+ * The `models` section of the served value, with its default filled. A host
+ * that serves an empty document (or no `models` node at all) reads as the
+ * declared default `true`, which is what the schema says.
+ */
+function servedModelFilter(state: ConfigFormSnapshot<Record<string, unknown>> | undefined): boolean {
+  const served = (state?.value as ServedEntry | undefined)?.models
+  return served?.freeOnly ?? FREE_ONLY_DEFAULT
+}
+
+/** The composition-side (base) `models` value, for a reset to inherit. */
+function servedModelFilterBase(state: ConfigFormSnapshot<Record<string, unknown>> | undefined): boolean | undefined {
+  return (state?.base as ServedEntry | undefined)?.models?.freeOnly
 }
 
 /** Field writes landing the form on the resolved value, in write order. */
@@ -239,7 +268,26 @@ function servedBase(state: ConfigFormSnapshot<Record<string, unknown>> | undefin
   return servedSection({ ...state, value: state?.base } as ConfigFormSnapshot<Record<string, unknown>>)
 }
 
-function diffWrites(form: FormState, value: IpPoolSettingsValue, base: Partial<IpPoolSettingsValue>): FieldWrite[] {
+/**
+ * The card's pending edits, grouped by the volatile node they address.
+ *
+ * The card has ONE Save button but spans two volatile nodes (`ipPool` and
+ * `models`), and the host rejects a batch whole if any path falls outside the
+ * declared volatile nodes — so the groups must stay apart all the way to the
+ * mutate call.
+ */
+interface CardWrites {
+  ipPool: FieldWrite[]
+  models: FieldWrite[]
+}
+
+function diffWrites(
+  form: FormState,
+  value: IpPoolSettingsValue,
+  base: Partial<IpPoolSettingsValue>,
+  freeOnly: boolean,
+  freeOnlyBase: boolean | undefined,
+): CardWrites {
   const writes: FieldWrite[] = []
   const push = (field: string, next: unknown, current: unknown, baseValue: unknown): void => {
     const edit = fieldWrite(field, next, current, baseValue)
@@ -254,7 +302,10 @@ function diffWrites(form: FormState, value: IpPoolSettingsValue, base: Partial<I
   push('pinnedStrict', form.pinnedStrict, value.pinnedStrict, base.pinnedStrict)
   push('probeModels', form.probeModels, value.probeModels, base.probeModels)
   push('maxConcurrentProbes', Number(form.maxConcurrentProbes), value.maxConcurrentProbes, base.maxConcurrentProbes)
-  return writes
+  // The filter rides its own node: a pool-only Change must not carry a
+  // `['ipPool','freeOnly']` path the host would reject.
+  const filter = fieldWrite('freeOnly', form.freeOnly, freeOnly, freeOnlyBase ?? FREE_ONLY_DEFAULT)
+  return { ipPool: writes, models: filter === undefined ? [] : [filter] }
 }
 
 function splitCsv(line: string): string[] {
@@ -690,12 +741,15 @@ function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardPr
   const served = servedSection(snapshot)
   const servedRef = useRef(served)
   servedRef.current = served
+  const servedFreeOnly = servedModelFilter(snapshot)
+  const servedFreeOnlyRef = useRef(servedFreeOnly)
+  servedFreeOnlyRef.current = servedFreeOnly
 
   // Hydrate the draft once from the first ready snapshot.
   useEffect(() => {
     if (snapshot?.status === 'ready' && !hydratedRef.current) {
       hydratedRef.current = true
-      setForm(formFromValue(servedRef.current))
+      setForm(formFromValue(servedRef.current, servedFreeOnlyRef.current))
     }
   }, [snapshot?.status, snapshot?.value])
 
@@ -765,9 +819,15 @@ function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardPr
     return null
   }
 
-  const writes = diffWrites(formRef.current, served, servedBase(snapshot))
+  const writes = diffWrites(
+    formRef.current,
+    served,
+    servedBase(snapshot),
+    servedFreeOnlyRef.current,
+    servedModelFilterBase(snapshot),
+  )
   const validation = validate()
-  const dirty = writes.length > 0 || validation !== null
+  const dirty = writes.ipPool.length > 0 || writes.models.length > 0 || validation !== null
   const available = snapshot?.status === 'ready' && settings !== undefined
   const writable = available && snapshot.writable
 
@@ -777,7 +837,7 @@ function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardPr
       setError(validation ?? t('saveError'))
       return
     }
-    if (writes.length === 0) {
+    if (writes.ipPool.length === 0 && writes.models.length === 0) {
       setSaved(true)
       setError(null)
       return
@@ -785,10 +845,14 @@ function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardPr
     setSaving(true)
     setError(null)
     try {
-      const ok = await settings.mutate(
-        poolWriteOps(writes),
-        snapshot.revision,
-      )
+      // Two volatile nodes, one Save: each group keeps its own node prefix.
+      // The host validates every path and rejects the batch whole, so a
+      // pool-only edit must not drag a `models.*` path along (or vice versa).
+      const ops = [
+        ...poolWriteOps(writes.ipPool, IP_POOL_FIELD),
+        ...poolWriteOps(writes.models, MODELS_FIELD),
+      ]
+      const ok = await settings.mutate(ops, snapshot.revision)
       setSaved(ok)
       setError(ok ? null : t('saveError'))
     } catch (err) {
@@ -801,7 +865,7 @@ function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardPr
 
   /** The shared SettingsForm discard: drop the draft, keep the served values. */
   const handleDiscard = (): void => {
-    setForm(formFromValue(servedRef.current))
+    setForm(formFromValue(servedRef.current, servedFreeOnlyRef.current))
     setSaved(false)
     setError(null)
   }
@@ -852,6 +916,22 @@ function CardBody(props: { settings: ConfigPageForm | undefined; t: IpPoolCardPr
       <OverviewBar status={form.enabled ? status : null} t={t} />
 
       <ApiKeySection settings={settings} t={t} writable={writable} />
+
+      <div className={styles.section}>
+        <span className={styles.sectionTitle}>{t('sectionModels')}</span>
+        <label className={styles.radio}>
+          <input
+            type="checkbox"
+            checked={form.freeOnly}
+            data-testid="field-freeOnly"
+            onChange={(event) => { setSaved(false); setForm({ ...form, freeOnly: event.target.checked }) }}
+          />
+          <span>
+            <span className={styles.fieldLabel}>{t('freeOnly')}</span>
+            <span className={styles.fieldHint}> {t('freeOnlyHint')}</span>
+          </span>
+        </label>
+      </div>
 
       <label className={styles.radio}>
         <input

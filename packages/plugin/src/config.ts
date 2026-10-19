@@ -89,6 +89,27 @@ export const CredentialSchema = Schema.object({
 })
 
 /**
+ * Model-picker display filter (the `models` volatile node).
+ *
+ * `freeOnly` narrows what the catalog EXPOSES to DSH, so the selector offers
+ * the free roster even while the paid lane is live. It is deliberately not a
+ * dispatch gate: nothing here can un-pick a model a session already chose, and
+ * an in-flight conversation on a paid model keeps streaming after the switch
+ * flips. That is the meaning of "display only" — see README.
+ *
+ * Default `true` keeps the picker on the free roster from the first boot; the
+ * paid roster is then opt-in per user, not opt-out.
+ */
+export const ModelFilterSchema = Schema.object({
+  freeOnly: Schema.boolean().default(true),
+})
+
+/** Plain shape of {@link ModelFilterSchema}, as read from the volatile node. */
+export interface ModelFilterSettings {
+  freeOnly?: boolean
+}
+
+/**
  * Normalize a key typed/pasted by a human: trim whitespace and a pasted
  * `Bearer ` prefix (common when copying from curl docs). Empty => undefined,
  * i.e. back to the anonymous lane.
@@ -164,12 +185,13 @@ export function resolveConfig(config: Opencode2dshLeoConfig = {}): ResolvedConfi
  * the served namespace from the Loader entry id. Two consequences drive this
  * shape:
  *
- *  - `ipPool` and `credential` are the `.volatile()` nodes, i.e. the whole
- *    settings form (dsh-settings' `volatileForm()` walks the root object and
- *    collects each volatile child's plain schema, so both arrive as one form
- *    value: `{ ipPool: {...}, credential: {...} }`). Nesting `.volatile()`
- *    deeper is a hard schemastery error, and per-field marks would also
- *    fragment the card's form value into siblings instead of top-level objects.
+ *  - `ipPool`, `credential` and `models` are the `.volatile()` nodes, i.e. the
+ *    whole settings form (dsh-settings' `volatileForm()` walks the root object
+ *    and collects each volatile child's plain schema, so all of them arrive as
+ *    one form value: `{ ipPool: {...}, credential: {...}, models: {...} }`).
+ *    Nesting `.volatile()` deeper is a hard schemastery error, and per-field
+ *    marks would also fragment the card's form value into siblings instead of
+ *    top-level objects.
  *  - every other field is ORDINARY configuration. `volatileForm()` drops it
  *    from the form, which is the intent: these are set by the composition
  *    (`cordis.patch.yml`) or a hand-edited profile patch, never by the card.
@@ -210,6 +232,14 @@ export const Config = Schema.object({
   ipPool: IpPoolConfigSchema.volatile(),
   /** The write-only API-key form (see {@link CredentialSchema}). */
   credential: CredentialSchema.volatile(),
+  /**
+   * The model-picker filter (see {@link ModelFilterSchema}). A third sibling
+   * volatile node rather than a field inside `credential`: that node's whole
+   * design is a write-only secret form (nothing in it can be read back), and a
+   * checkbox needs a readable round-trip. `ipPool` is wrong too — its fields
+   * are consumed by the pool runtime through `toIpPoolConfig()`.
+   */
+  models: ModelFilterSchema.volatile(),
 })
 
 /**
@@ -220,14 +250,16 @@ export const Config = Schema.object({
  * `loader/volatile-update`, so consumers read `.get()` at the moment they need a
  * snapshot and never cache the object it returned.
  */
-export interface ResolvedPluginConfig extends Omit<ResolvedConfig, 'ipPool' | 'credential'> {
+export interface ResolvedPluginConfig extends Omit<ResolvedConfig, 'ipPool' | 'credential' | 'models'> {
   ipPool: VolatileRef<IpPoolSettings>
   /** `get()` may answer undefined until the Loader materializes an object. */
   credential: VolatileRef<CredentialSettings | undefined>
+  /** `get()` may answer undefined until the Loader materializes an object. */
+  models: VolatileRef<ModelFilterSettings | undefined>
 }
 
 /** Every field except the volatile settings references. */
-export type OrdinaryPluginConfig = Omit<ResolvedPluginConfig, 'ipPool' | 'credential'>
+export type OrdinaryPluginConfig = Omit<ResolvedPluginConfig, 'ipPool' | 'credential' | 'models'>
 
 /**
  * The ordinary half of a resolved config, for the call sites that reconfigure
@@ -235,7 +267,7 @@ export type OrdinaryPluginConfig = Omit<ResolvedPluginConfig, 'ipPool' | 'creden
  * would hand `startIpPool` the volatile references where it expects values.
  */
 export function ordinaryConfig(config: ResolvedPluginConfig): OrdinaryPluginConfig {
-  const { ipPool: _ipPool, credential: _credential, ...ordinary } = config
+  const { ipPool: _ipPool, credential: _credential, models: _models, ...ordinary } = config
   return ordinary
 }
 
